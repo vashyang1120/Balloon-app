@@ -17,7 +17,7 @@ import {
   updateDoc,
   deleteDoc
 } from 'firebase/firestore';
-import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon } from 'lucide-react';
+import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info } from 'lucide-react';
 
 // --- 預設 36 個氣球造型資料 ---
 const DEFAULT_BALLOONS = [
@@ -81,7 +81,6 @@ const getGridColsClasses = (size) => {
 };
 
 // --- Firebase 初始化 ---
-// Your web app's Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBOxQq-YoKosDjHTFIr9P0j-4-rS5wC_2Q",
   authDomain: "balloon-order-app.firebaseapp.com",
@@ -92,7 +91,6 @@ const firebaseConfig = {
   measurementId: "G-LF5QRLJDL5"
 };
 
-// 🌟 修復重複初始化的問題 (避免 CodeSandbox 熱重載時崩潰)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -100,9 +98,13 @@ const appId = firebaseConfig.projectId || 'my-balloon-app';
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('guest'); // 'guest', 'admin', 'settings'
   
-  // 系統設定狀態 (加入 VIP、背景、QR Code 等設定)
+  // 解析網址，判斷是否為「獨立查詢模式」
+  const urlParams = new URLSearchParams(window.location.search);
+  const isTrackerMode = urlParams.get('view') === 'tracker';
+  const [view, setView] = useState(isTrackerMode ? 'tracker' : 'guest'); 
+  
+  // 系統設定狀態
   const [config, setConfig] = useState({ 
     gridSize: 24, 
     timePerItem: 3, 
@@ -118,24 +120,22 @@ export default function App() {
     vipThumbnailSize: 'md',
     bgStyle: '',
     qrCodeUrl: '',
-    vipModeActive: false // VIP 點單模式狀態
+    vipModeActive: false,
+    adminPin: '8888' 
   });
   
-  // 訂單狀態
   const [orders, setOrders] = useState([]);
-  
-  // UI 狀態
   const [isLoading, setIsLoading] = useState(true);
   const [selectedBalloon, setSelectedBalloon] = useState(null);
   const [successOrder, setSuccessOrder] = useState(null);
 
-  // --- 🌟 Gemini AI 狀態 ---
+  // Gemini AI 狀態
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [aiQuery, setAiQuery] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiReason, setAiReason] = useState('');
 
-  // --- 🌟 更改造型狀態 ---
+  // 更改造型狀態
   const [isChangeOrderModalOpen, setIsChangeOrderModalOpen] = useState(false);
   const [changeOrderNumber, setChangeOrderNumber] = useState('');
   const [changeOriginalBalloonId, setChangeOriginalBalloonId] = useState('');
@@ -143,8 +143,21 @@ export default function App() {
   const [verifiedOrderForChange, setVerifiedOrderForChange] = useState(null);
   const [newSelectedBalloon, setNewSelectedBalloon] = useState(null);
 
-  // 全螢幕狀態
+  // 清空訂單狀態
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+
+  // 查詢進度狀態
+  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+  const [trackOrderNumber, setTrackOrderNumber] = useState('');
+
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 🌟 全域系統提示與對話框狀態 (取代 alert 與 confirm)
+  const [alertMessage, setAlertMessage] = useState('');
+  const [confirmAction, setConfirmAction] = useState(null); // { message: string, onConfirm: function }
+  const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
+  const [adminPinInput, setAdminPinInput] = useState('');
+  const [adminPinError, setAdminPinError] = useState('');
 
   useEffect(() => {
     const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -160,7 +173,6 @@ export default function App() {
     }
   };
 
-  // 1. 驗證與登入
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -185,26 +197,21 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. 監聽 Firebase 資料
   useEffect(() => {
     if (!user) return;
 
-    // 監聽設定檔
     const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
     const unsubConfig = onSnapshot(configRef, (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data();
-        setConfig(prev => ({ ...prev, ...data }));
+        setConfig(prev => ({ ...prev, ...docSnap.data() }));
       } else {
         setDoc(configRef, config);
       }
     }, (error) => console.error("Config fetch error:", error));
 
-    // 監聽所有訂單
     const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
     const unsubOrders = onSnapshot(ordersRef, (snapshot) => {
       const fetchedOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      // 排序邏輯：VIP 優先，接著按時間排序
       fetchedOrders.sort((a, b) => {
         if (a.isVip && !b.isVip) return -1;
         if (!a.isVip && b.isVip) return 1;
@@ -223,22 +230,17 @@ export default function App() {
   // --- 計算衍生狀態 ---
   const pendingOrders = useMemo(() => orders.filter(o => o.status === 'pending'), [orders]);
   const waitingCount = pendingOrders.length;
-  const estimatedWaitTime = waitingCount * config.timePerItem;
-  
-  // 檢查是否已達上限 (如果 VIP 模式開啟，則無視上限)
+  const estimatedWaitTime = pendingOrders.reduce((totalTime, order) => totalTime + config.timePerItem, 0);
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
   const displayBalloons = useMemo(() => {
-    const sourceBalloons = config.balloons || DEFAULT_BALLOONS;
-    return sourceBalloons.slice(0, config.gridSize);
+    return (config.balloons || DEFAULT_BALLOONS).slice(0, config.gridSize);
   }, [config.gridSize, config.balloons]);
 
   const displayVipBalloons = useMemo(() => {
-    const sourceVipBalloons = config.vipBalloons || [];
-    return sourceVipBalloons.slice(0, config.vipGridSize);
+    return (config.vipBalloons || []).slice(0, config.vipGridSize);
   }, [config.vipGridSize, config.vipBalloons]);
 
-  // 結合一般與 VIP 造型，供更改訂單時選擇
   const allAvailableBalloons = useMemo(() => {
     const combined = [...displayBalloons];
     if (config.showVipSection) {
@@ -249,9 +251,7 @@ export default function App() {
     return combined;
   }, [displayBalloons, displayVipBalloons, config.showVipSection]);
 
-  const isImageUrl = (str) => {
-    return str && typeof str === 'string' && (str.startsWith('http') || str.startsWith('data:'));
-  };
+  const isImageUrl = (str) => typeof str === 'string' && (str.startsWith('http') || str.startsWith('data:'));
 
   const getDisplayImageUrl = (url) => {
     if (!url || typeof url !== 'string') return url;
@@ -262,9 +262,8 @@ export default function App() {
     return url;
   };
 
-  // --- 背景樣式計算 ---
   const bgStyles = useMemo(() => {
-    if (!config.bgStyle) return { backgroundColor: '#fdf2f8' }; // 預設 pink-50
+    if (!config.bgStyle) return { backgroundColor: '#fdf2f8' };
     if (isImageUrl(config.bgStyle)) {
         return {
             backgroundImage: `url(${getDisplayImageUrl(config.bgStyle)})`,
@@ -276,20 +275,17 @@ export default function App() {
     return { background: config.bgStyle };
   }, [config.bgStyle]);
 
-  // --- 🌟 Gemini API ---
+  // --- API 與事件處理 ---
   const callGeminiAPI = async (prompt, isJson = false) => {
     const apiKey = ""; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-    
     const payload = { contents: [{ parts: [{ text: prompt }] }] };
-    
     if (isJson) {
       payload.generationConfig = {
         responseMimeType: "application/json",
         responseSchema: { type: "OBJECT", properties: { id: { type: "NUMBER" }, reason: { type: "STRING" } } }
       };
     }
-
     for (let i = 0; i < 5; i++) {
       try {
         const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -326,10 +322,13 @@ export default function App() {
     }
   };
 
-  // --- 處理函式 ---
-  const handleBalloonClick = (balloon) => {
-    if (isOrderFull) {
-      alert(config.fullOrderMessage);
+  const handleBalloonClick = (balloon, isVipCategory = false) => {
+    if (isVipCategory && !config.vipModeActive) {
+      setAlertMessage("👑 這是 VIP 專屬造型！請先請氣球小V為您開啟 VIP 模式才能點選喔！");
+      return;
+    }
+    if (!config.vipModeActive && isOrderFull) {
+      setAlertMessage(config.fullOrderMessage);
       return;
     }
     setSelectedBalloon(balloon);
@@ -339,18 +338,22 @@ export default function App() {
     if (!user) return;
     
     if (!config.vipModeActive && pendingOrders.length >= config.maxWaitCount) {
-        alert(config.fullOrderMessage);
+        setAlertMessage(config.fullOrderMessage);
         setSelectedBalloon(null);
         return;
     }
 
     const maxOrderNum = orders.length > 0 ? Math.max(...orders.map(o => o.orderNumber || 0)) : 0;
     const newOrderNumber = maxOrderNum + 1;
-    
-    const currentWaitCount = pendingOrders.length;
-    const currentEstTime = currentWaitCount * config.timePerItem;
-
     const isVipOrder = config.vipModeActive === true;
+    
+    let currentWaitCount = 0;
+    if (isVipOrder) {
+        currentWaitCount = pendingOrders.filter(o => o.isVip).length;
+    } else {
+        currentWaitCount = pendingOrders.length;
+    }
+    const currentEstTime = currentWaitCount * config.timePerItem;
 
     const newOrder = {
       orderNumber: newOrderNumber,
@@ -367,7 +370,6 @@ export default function App() {
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), newOrder);
       
-      // 如果是 VIP 點單，點完一次後自動關閉 VIP 模式
       if (isVipOrder) {
           const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
           await updateDoc(configRef, { vipModeActive: false });
@@ -386,7 +388,7 @@ export default function App() {
 
     } catch (error) {
       console.error("Error placing order:", error);
-      alert("點單失敗，請稍後再試。");
+      setAlertMessage("點單失敗，請稍後再試。");
     }
   };
 
@@ -400,19 +402,35 @@ export default function App() {
     }
   };
 
-  const handleCancelOrder = async (orderId) => {
+  const handleCancelOrder = (orderId) => {
     if (!user) return;
-    if (window.confirm("確定要刪除這筆訂單嗎？")) {
-      try {
-        const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
-        await deleteDoc(orderRef);
-      } catch (error) {
-        console.error("Error deleting order:", error);
+    setConfirmAction({
+      message: '確定要刪除這筆訂單嗎？',
+      onConfirm: async () => {
+        try {
+          const orderRef = doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId);
+          await deleteDoc(orderRef);
+        } catch (error) {
+          console.error("Error deleting order:", error);
+        }
       }
+    });
+  };
+
+  const handleClearAllOrders = async () => {
+    if (!user) return;
+    try {
+      const promises = orders.map(order => 
+        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id))
+      );
+      await Promise.all(promises);
+      setIsClearConfirmOpen(false); 
+    } catch (error) {
+      console.error("Error clearing all orders:", error);
+      setAlertMessage("清空失敗，請稍後再試。");
     }
   };
 
-  // --- 🌟 更改訂單相關函式 ---
   const handleVerifyOrderForChange = () => {
     setChangeError('');
     const targetOrderNum = parseInt(changeOrderNumber);
@@ -435,7 +453,6 @@ export default function App() {
       return;
     }
 
-    // 檢查是否為「正在製作中 (第一個)」
     if (pendingOrders[0] && pendingOrders[0].id === targetOrder.id) {
       setChangeError('氣球小V已經開始製作您的氣球了，來不及更改囉！✨');
       return;
@@ -459,14 +476,13 @@ export default function App() {
       setNewSelectedBalloon(null);
       setChangeOrderNumber('');
       setChangeOriginalBalloonId('');
-      alert('造型已成功為您更換為：' + newSelectedBalloon.name + '！🎈');
+      setAlertMessage('造型已成功為您更換為：' + newSelectedBalloon.name + '！🎈');
 
     } catch (error) {
       console.error("Error changing order:", error);
-      alert("更換失敗，請稍後再試。");
+      setAlertMessage("更換失敗，請稍後再試。");
     }
   };
-
 
   const handleSaveConfig = async (newConfigData) => {
     if (!user) return;
@@ -476,6 +492,17 @@ export default function App() {
       setView('admin');
     } catch (error) {
       console.error("Error saving config:", error);
+    }
+  };
+
+  const handleAdminLogin = () => {
+    if (adminPinInput === (config.adminPin || '8888')) {
+        setView('admin');
+        setAdminPinModalOpen(false);
+        setAdminPinInput('');
+        setAdminPinError('');
+    } else {
+        setAdminPinError('密碼錯誤，請再試一次！');
     }
   };
 
@@ -492,7 +519,128 @@ export default function App() {
 
   // --- 畫面元件 ---
 
-  // 1. 賓客點單畫面 (首頁)
+  // 1. 🌟 獨立查詢進度畫面 (提供給 LINE 連結用)
+  const TrackerView = () => {
+    const [selectedNum, setSelectedNum] = useState(null);
+
+    const selectableOrders = useMemo(() => {
+        const pendings = pendingOrders;
+        const completeds = orders.filter(o => o.status === 'completed').slice(-15);
+        return [...pendings, ...completeds].sort((a,b) => a.orderNumber - b.orderNumber);
+    }, [pendingOrders, orders]);
+
+    if (!selectedNum) {
+        return (
+            <div className="min-h-screen flex flex-col items-center p-4 pt-12 animate-in fade-in">
+                <div className="bg-white/90 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-indigo-100 w-full max-w-md">
+                    <div className="flex items-center justify-center gap-3 mb-6 text-indigo-600">
+                        <Search size={32} className="shrink-0" />
+                        <h2 className="text-2xl font-black tracking-wider">即時進度查詢</h2>
+                    </div>
+                    <p className="text-center font-bold text-gray-500 mb-6 text-sm">請點選您的專屬號碼：</p>
+                    
+                    <div className="flex flex-wrap justify-center gap-3 max-h-[60vh] overflow-y-auto p-2">
+                        {selectableOrders.length > 0 ? selectableOrders.map(o => (
+                            <button
+                                key={o.id}
+                                onClick={() => setSelectedNum(o.orderNumber)}
+                                className={`w-16 h-16 rounded-2xl font-black text-2xl border-2 transition-all shadow-sm active:scale-95 ${
+                                    o.status === 'completed' 
+                                    ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' 
+                                    : 'bg-white text-indigo-600 border-indigo-100 hover:bg-indigo-50 hover:border-indigo-300'
+                                }`}
+                            >
+                                {o.orderNumber}
+                            </button>
+                        )) : (
+                            <p className="text-gray-400 font-medium py-8">目前沒有進行中的訂單</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    const trackedOrder = orders.find(o => o.orderNumber === selectedNum);
+    const trackedIndex = trackedOrder ? pendingOrders.findIndex(o => o.id === trackedOrder.id) : -1;
+
+    return (
+        <div className="min-h-screen flex flex-col items-center p-4 pt-12 animate-in fade-in slide-in-from-right-4">
+            <div className="w-full max-w-md mb-4">
+                <button onClick={() => setSelectedNum(null)} className="text-indigo-600 font-bold flex items-center gap-1 bg-white/90 backdrop-blur-sm px-5 py-2.5 rounded-full shadow-md hover:bg-white active:scale-95 transition-all">
+                    <ChevronLeft size={20}/> 返回號碼列表
+                </button>
+            </div>
+
+            <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-indigo-100 w-full max-w-md">
+                {!trackedOrder && (
+                    <div className="text-center text-gray-500 font-medium py-8">
+                        找不到這個號碼的訂單喔，請確認是否輸入正確。
+                    </div>
+                )}
+
+                {trackedOrder && trackedOrder.status === 'completed' && (
+                    <div className="text-center animate-in zoom-in duration-500 py-6">
+                        <PartyPopper size={64} className="mx-auto mb-4 text-green-500 animate-bounce" />
+                        <h4 className="font-black text-2xl mb-2 text-gray-800">您的氣球已完成！</h4>
+                        <p className="font-bold text-green-600 text-lg">請前往攤位領取您的</p>
+                        <div className="inline-flex items-center gap-2 bg-green-50 px-4 py-2 rounded-xl mt-3 border border-green-200 shadow-sm">
+                            {isImageUrl(trackedOrder.icon) ? (
+                                <img src={getDisplayImageUrl(trackedOrder.icon)} alt={trackedOrder.balloonName} className="w-8 h-8 object-cover rounded-md" />
+                            ) : (
+                                <span className="text-3xl">{trackedOrder.icon}</span>
+                            )}
+                            <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
+                        </div>
+                    </div>
+                )}
+
+                {trackedOrder && trackedOrder.status === 'pending' && (
+                    <div>
+                        <h4 className="font-black text-indigo-800 mb-6 flex items-center justify-between border-b-2 border-indigo-100 pb-4 text-xl">
+                            <span>您的號碼：#{trackedOrder.orderNumber}</span>
+                            {trackedOrder.isVip && <span className="bg-amber-100 text-amber-700 text-sm px-3 py-1 rounded-lg flex items-center gap-1 font-black shadow-sm"><Crown size={16}/> VIP 優先</span>}
+                        </h4>
+                        
+                        <div className="flex items-center gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                            <div className="w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden">
+                                {isImageUrl(trackedOrder.icon) ? <img src={getDisplayImageUrl(trackedOrder.icon)} alt="icon" className="w-full h-full object-cover"/> : trackedOrder.icon}
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-gray-400 mb-1">您預訂的造型</p>
+                                <p className="font-black text-xl text-gray-800">{trackedOrder.balloonName}</p>
+                            </div>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            {trackedIndex === 0 ? (
+                                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white p-6 rounded-2xl text-center shadow-lg animate-pulse">
+                                    <Sparkles size={32} className="mx-auto mb-2 text-yellow-300" />
+                                    <p className="font-black text-xl mb-1">氣球小V正在製作您的氣球！</p>
+                                    <p className="font-medium text-indigo-100">請準備前往攤位領取喔</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="flex justify-between items-center bg-indigo-50 p-5 rounded-2xl border border-indigo-100">
+                                        <span className="text-indigo-600 font-bold">您的前方還有</span>
+                                        <span className="text-4xl font-black text-indigo-700">{trackedIndex} <span className="text-lg font-medium">人</span></span>
+                                    </div>
+                                    <div className="flex justify-between items-center bg-pink-50 p-5 rounded-2xl border border-pink-100">
+                                        <span className="text-pink-600 font-bold">預估還需等待</span>
+                                        <span className="text-4xl font-black text-pink-500">{trackedIndex * config.timePerItem} <span className="text-lg font-medium">分鐘</span></span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <p className="text-center text-xs text-gray-400 mt-6 font-medium">畫面會即時自動更新，無需重新整理</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+  };
+
+  // 2. 賓客現場點單畫面 (主頁)
   const GuestView = () => (
     <div className="pb-8 relative">
       
@@ -505,44 +653,53 @@ export default function App() {
           </div>
       )}
 
-      {/* 狀態列 */}
-      <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4 border border-pink-100">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 text-pink-600">
-            <div className="bg-pink-100 p-2 rounded-full"><Users size={20} /></div>
-            <div>
-              <p className="text-sm text-pink-500 font-medium leading-none mb-1">目前等待</p>
-              <p className="text-xl font-bold leading-none">
-                {waitingCount} <span className="text-sm font-normal text-pink-400">/ {config.maxWaitCount}人</span>
-              </p>
+      {/* 🌟 狀態列與現正製作 */}
+      <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-sm p-4 mb-4 border border-pink-100 flex flex-col gap-4">
+        
+        {/* 現正製作 Bar */}
+        <div className="flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-xl shadow-md">
+            <div className="flex items-center gap-2 sm:gap-3">
+                <Sparkles size={24} className="animate-pulse text-yellow-300" />
+                <span className="font-bold text-base sm:text-lg tracking-wider">現正製作</span>
             </div>
-          </div>
-          <div className="w-px h-10 bg-pink-100 hidden sm:block"></div>
-          <div className="flex items-center gap-2 text-indigo-600">
-            <div className="bg-indigo-100 p-2 rounded-full"><Clock size={20} /></div>
-            <div>
-              <p className="text-sm text-indigo-500 font-medium leading-none mb-1">預估時間</p>
-              <p className="text-xl font-bold leading-none">{estimatedWaitTime} <span className="text-sm font-normal">分鐘</span></p>
+            <div className="text-2xl sm:text-3xl font-black tracking-tighter">
+                #{pendingOrders[0] ? pendingOrders[0].orderNumber : '--'}
             </div>
-          </div>
         </div>
-        <div className="flex items-center gap-2">
-            <button 
-                onClick={() => setIsChangeOrderModalOpen(true)}
-                className="text-indigo-500 hover:text-indigo-600 transition-colors flex items-center gap-1 text-sm bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-full font-medium shadow-sm border border-indigo-100"
-            >
-                <Edit3 size={16} /> 更改造型
-            </button>
-            <button 
-                onClick={() => setView('admin')}
-                className="text-gray-400 hover:text-pink-500 transition-colors flex items-center gap-1 text-sm bg-gray-50 hover:bg-pink-50 px-3 py-1.5 rounded-full shadow-sm"
-            >
-                <SettingsIcon size={16} /> 後台
-            </button>
+
+        {/* 數據與按鈕 */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-around">
+                <div className="flex items-center gap-2 text-pink-600">
+                    <div className="bg-pink-100 p-2 rounded-full"><Users size={20} /></div>
+                    <div>
+                    <p className="text-xs sm:text-sm text-pink-500 font-medium leading-none mb-1">目前等待</p>
+                    <p className="text-lg sm:text-xl font-bold leading-none">
+                        {waitingCount} <span className="text-xs sm:text-sm font-normal text-pink-400">/ {config.maxWaitCount}人</span>
+                    </p>
+                    </div>
+                </div>
+                <div className="w-px h-10 bg-pink-100 hidden sm:block"></div>
+                <div className="flex items-center gap-2 text-indigo-600">
+                    <div className="bg-indigo-100 p-2 rounded-full"><Clock size={20} /></div>
+                    <div>
+                    <p className="text-xs sm:text-sm text-indigo-500 font-medium leading-none mb-1">預估時間</p>
+                    <p className="text-lg sm:text-xl font-bold leading-none">{estimatedWaitTime} <span className="text-xs sm:text-sm font-normal">分鐘</span></p>
+                    </div>
+                </div>
+            </div>
+            
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button 
+                    onClick={() => setIsChangeOrderModalOpen(true)}
+                    className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center justify-center gap-1 text-sm px-4 py-2 rounded-full font-bold shadow-sm active:scale-95 w-full sm:w-auto"
+                >
+                    <Edit3 size={16} /> 更改造型
+                </button>
+            </div>
         </div>
       </div>
 
-      {/* 滿單提示警告 (如果是滿的) */}
       {isOrderFull && (
           <div className="mb-6 bg-red-50 border border-red-200 text-red-600 p-4 rounded-2xl flex items-start gap-3 shadow-sm">
               <AlertCircle className="shrink-0 mt-0.5" />
@@ -556,7 +713,7 @@ export default function App() {
       <div className="mb-6">
         <button 
           onClick={() => {
-              if(isOrderFull) { alert(config.fullOrderMessage); return; }
+              if(isOrderFull) { setAlertMessage(config.fullOrderMessage); return; }
               setIsAiModalOpen(true);
           }}
           className={`w-full sm:w-auto flex items-center justify-center gap-2 text-white px-6 py-3 rounded-2xl shadow-lg transition-all font-bold ${
@@ -570,23 +727,32 @@ export default function App() {
         </button>
       </div>
 
-      {/* 👑 VIP 專區 (由後台控制是否顯示) */}
+      {/* 👑 VIP 專區 */}
       {config.showVipSection && displayVipBalloons.length > 0 && (
-          <div className="mb-8 bg-gradient-to-br from-yellow-50 to-amber-50 p-4 sm:p-6 rounded-3xl border border-yellow-200 shadow-sm">
+          <div className="mb-8 bg-gradient-to-br from-yellow-50 to-amber-50 p-4 sm:p-6 rounded-3xl border border-yellow-200 shadow-sm relative">
               <h2 className="text-xl font-black text-amber-700 mb-4 flex items-center gap-2 drop-shadow-sm">
                   <Crown size={26} className="text-yellow-500 fill-yellow-500" />
                   VIP 專屬尊榮造型
               </h2>
-              <div className={`grid gap-3 sm:gap-4 ${getGridColsClasses(config.vipThumbnailSize)} ${isOrderFull ? 'opacity-60 grayscale-[50%]' : ''}`}>
+              <div className={`grid gap-3 sm:gap-4 ${getGridColsClasses(config.vipThumbnailSize)}`}>
                   {displayVipBalloons.map(balloon => (
                       <button
                           key={`vip-${balloon.id}`}
-                          onClick={() => handleBalloonClick(balloon)}
-                          className={`group flex flex-col items-center bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent ${
-                              isOrderFull ? 'cursor-not-allowed' : 'hover:shadow-md hover:border-yellow-400 hover:bg-white active:scale-95'
+                          onClick={() => handleBalloonClick(balloon, true)}
+                          className={`group flex flex-col items-center rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent relative overflow-hidden ${
+                              config.vipModeActive 
+                                  ? 'bg-white/90 backdrop-blur-sm hover:shadow-md hover:border-yellow-400 hover:bg-white active:scale-95' 
+                                  : 'bg-gray-100/60 opacity-75 cursor-not-allowed'
                           }`}
                       >
-                          <div className={`${getSizeClasses(config.vipThumbnailSize)} rounded-xl flex items-center justify-center mb-2 transition-transform overflow-hidden ${!isOrderFull && 'group-hover:scale-110'} ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
+                          {!config.vipModeActive && (
+                              <div className="absolute inset-0 bg-gray-500/10 z-10 flex flex-col items-center justify-center backdrop-blur-[1px]">
+                                  <div className="bg-gray-800/70 text-white p-2 rounded-full shadow-lg mb-1">
+                                      <Lock size={24} />
+                                  </div>
+                              </div>
+                          )}
+                          <div className={`${getSizeClasses(config.vipThumbnailSize)} rounded-xl flex items-center justify-center mb-2 transition-transform overflow-hidden ${config.vipModeActive && 'group-hover:scale-110'} ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
                               {isImageUrl(balloon.icon) ? (
                                   <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
                               ) : (balloon.icon)}
@@ -607,12 +773,11 @@ export default function App() {
         {displayBalloons.map(balloon => (
           <button
             key={balloon.id}
-            onClick={() => handleBalloonClick(balloon)}
+            onClick={() => handleBalloonClick(balloon, false)}
             className={`group flex flex-col items-center bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent ${
                 isOrderFull ? 'cursor-not-allowed' : 'hover:shadow-md hover:border-pink-300 hover:bg-white active:scale-95'
             }`}
           >
-            {/* 圖片或 Emoji 預覽區 */}
             <div className={`${getSizeClasses(config.thumbnailSize)} rounded-xl flex items-center justify-center mb-2 transition-transform overflow-hidden ${!isOrderFull && 'group-hover:scale-110'} ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
               {isImageUrl(balloon.icon) ? (
                 <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
@@ -627,7 +792,7 @@ export default function App() {
 
       {/* 📌 QR Code 浮動區塊 */}
       {config.qrCodeUrl && (
-          <div className="fixed bottom-6 right-6 z-40 w-24 h-24 sm:w-32 sm:h-32 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.12)] border-4 border-white bg-white hover:scale-110 transition-transform origin-bottom-right">
+          <div className="fixed bottom-6 right-6 z-40 w-24 h-24 sm:w-32 sm:h-32 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.15)] border-4 border-white bg-white hover:scale-110 transition-transform origin-bottom-right">
               <img src={getDisplayImageUrl(config.qrCodeUrl)} alt="QR Code" className="w-full h-full object-cover" />
           </div>
       )}
@@ -648,7 +813,6 @@ export default function App() {
             </div>
 
             {!verifiedOrderForChange ? (
-                // 階段 1：驗證身份 (改用按鈕選單)
                 <div className="space-y-6">
                     <p className="text-sm text-gray-500">為了保護您的權益，請點選您的專屬號碼，並選擇您原本預訂的造型以進行驗證。</p>
                     
@@ -706,7 +870,6 @@ export default function App() {
                     </button>
                 </div>
             ) : (
-                // 階段 2：選擇新造型
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300">
                     <div className="mb-6 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex justify-between items-center shadow-inner">
                         <div>
@@ -755,88 +918,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 AI 魔法顧問 Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <div className="w-16 h-16 mx-auto bg-fuchsia-100 text-fuchsia-500 rounded-full flex items-center justify-center mb-4 shadow-inner">
-              <Wand2 size={32} />
-            </div>
-            <h3 className="text-2xl font-bold text-center text-gray-800 mb-2">魔法顧問</h3>
-            <p className="text-center text-gray-500 mb-6 text-sm">
-              請告訴我您今天的心情，或是喜歡什麼動物、顏色？我來為您挑選最棒的造型！
-            </p>
-            
-            <textarea
-              value={aiQuery}
-              onChange={(e) => setAiQuery(e.target.value)}
-              placeholder="例如：我想要一個在天上飛的、或是粉紅色的可愛動物..."
-              className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl mb-6 focus:outline-none focus:ring-2 focus:ring-fuchsia-500 resize-none h-24"
-            />
-
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setIsAiModalOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-                disabled={isAiLoading}
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleAiRecommend}
-                disabled={isAiLoading || !aiQuery.trim()}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-fuchsia-500 hover:bg-fuchsia-600 shadow-lg shadow-fuchsia-500/30 transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
-              >
-                {isAiLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-                {isAiLoading ? '施法中...' : '為我推薦'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 確認點單 Modal */}
-      {selectedBalloon && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <h3 className="text-2xl font-bold text-center text-gray-800 mb-2">確認造型</h3>
-            
-            {/* 🌟 顯示 AI 推薦理由 */}
-            {aiReason ? (
-              <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
-                <Sparkles size={16} className="text-fuchsia-500 shrink-0" />
-                <span>{aiReason}</span>
-              </div>
-            ) : (
-              <p className="text-center text-gray-500 mb-6">您選擇的是 <span className="text-pink-500 font-bold">{selectedBalloon.name}</span>，確定要送出嗎？</p>
-            )}
-            
-            <div className={`w-32 h-32 mx-auto rounded-2xl flex items-center justify-center text-6xl mb-8 shadow-inner overflow-hidden ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
-              {isImageUrl(selectedBalloon.icon) ? (
-                <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
-              ) : (
-                selectedBalloon.icon
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button 
-                onClick={() => { setSelectedBalloon(null); setAiReason(''); }}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                重新選擇
-              </button>
-              <button 
-                onClick={() => handlePlaceOrder(selectedBalloon)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 shadow-lg shadow-pink-500/30 transition-colors"
-              >
-                確定送出
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 點單成功 Modal */}
       {successOrder && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in duration-300">
@@ -848,16 +929,15 @@ export default function App() {
             </div>
             
             <h3 className="text-2xl font-bold text-gray-800 mb-1">點單成功！</h3>
-            <p className="text-gray-500 mb-6">請記住您的專屬號碼</p>
+            <p className="text-gray-500 mb-6 font-medium text-sm">若您已加入官方 LINE<br/>可以點擊選單查詢即時製作進度喔！</p>
             
             <div className="bg-pink-50 border-2 border-pink-200 rounded-2xl p-6 mb-6 relative">
-              {/* 如果是 VIP 訂單，顯示徽章 */}
               {successOrder.isVip && (
                   <div className="absolute -top-3 -right-3 bg-gradient-to-r from-yellow-400 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1">
                       <Crown size={12} /> VIP 優先
                   </div>
               )}
-              <p className="text-sm text-pink-600 font-medium mb-1">您的號碼</p>
+              <p className="text-sm text-pink-600 font-medium mb-1">您的專屬號碼</p>
               <p className="text-6xl font-black text-pink-500 mb-4">#{successOrder.orderNumber}</p>
               
               <div className="flex items-center justify-center gap-2 text-gray-600 font-medium bg-white py-2 px-4 rounded-lg inline-flex shadow-sm">
@@ -870,7 +950,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 🌟 AI 魔法物語 */}
             {successOrder.story && (
               <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-6 text-left relative overflow-hidden">
                 <Sparkles size={80} className="absolute -top-4 -right-4 text-indigo-100 opacity-50" />
@@ -880,20 +959,9 @@ export default function App() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 mb-8 text-left">
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><Users size={12}/> 前方等待</p>
-                <p className="text-lg font-bold text-gray-800">{successOrder.waitingAhead} <span className="text-sm font-normal text-gray-500">人</span></p>
-              </div>
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <p className="text-xs text-gray-500 mb-1 flex items-center gap-1"><Clock size={12}/> 預估時間</p>
-                <p className="text-lg font-bold text-gray-800">{successOrder.estimatedWaitTime} <span className="text-sm font-normal text-gray-500">分鐘</span></p>
-              </div>
-            </div>
-
             <button 
               onClick={() => setSuccessOrder(null)}
-              className="w-full py-3 px-4 rounded-xl font-bold text-white bg-gray-800 hover:bg-gray-900 shadow-lg transition-colors"
+              className="w-full py-4 px-4 rounded-xl font-bold text-white bg-gray-900 hover:bg-black shadow-lg transition-colors text-lg"
             >
               我知道了
             </button>
@@ -903,7 +971,7 @@ export default function App() {
     </div>
   );
 
-  // 2. 管理員後台
+  // 3. 管理員後台
   const AdminView = () => (
     <div className="pb-8">
       <div className="flex items-center justify-between mb-6">
@@ -999,15 +1067,17 @@ export default function App() {
         )}
       </div>
       
-      {/* 已完成訂單預覽 */}
-      <div className="mt-8 opacity-60">
-        <h3 className="text-sm font-bold text-gray-500 mb-3 px-2">最近完成的訂單</h3>
-        <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
-          {orders.filter(o => o.status === 'completed').slice(-5).reverse().map(order => (
-            <div key={order.id} className="p-3 border-b border-gray-200 last:border-0 flex items-center justify-between text-sm">
+      {/* 已完成訂單預覽 (🌟 顯示全部並加上卷軸) */}
+      <div className="mt-8 opacity-80">
+        <h3 className="text-sm font-bold text-gray-600 mb-3 px-2 flex items-center justify-between">
+          已完成的訂單 ({orders.filter(o => o.status === 'completed').length} 筆)
+        </h3>
+        <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden max-h-60 overflow-y-auto shadow-inner">
+          {orders.filter(o => o.status === 'completed').reverse().map(order => (
+            <div key={order.id} className="p-3 border-b border-gray-200 last:border-0 flex items-center justify-between text-sm hover:bg-gray-100 transition-colors">
               <div className="flex items-center gap-3">
                 <span className="text-gray-400 font-bold">#{order.orderNumber}</span>
-                <span className="text-gray-600 line-through">{order.balloonName}</span>
+                <span className="text-gray-700 font-medium">{order.balloonName}</span>
                 {order.isVip && <Crown size={12} className="text-amber-400" />}
               </div>
               <span className="text-gray-400 text-xs font-medium">
@@ -1015,12 +1085,54 @@ export default function App() {
               </span>
             </div>
           ))}
+          {orders.filter(o => o.status === 'completed').length === 0 && (
+            <div className="p-4 text-center text-gray-400 text-xs font-medium">目前還沒有已完成的訂單喔</div>
+          )}
         </div>
       </div>
+
+      {/* 🌟 清空所有資料按鈕 */}
+      <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
+        <button 
+          onClick={() => setIsClearConfirmOpen(true)}
+          className="flex items-center gap-2 text-red-500 bg-red-50 hover:bg-red-500 hover:text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-sm active:scale-95 border border-red-100 hover:border-red-500"
+        >
+          <Trash2 size={20} /> 清空本次活動所有訂單資料
+        </button>
+      </div>
+
+      {/* 🌟 清空所有訂單確認 Modal (防呆機制) */}
+      {isClearConfirmOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-500 mb-4 shadow-inner">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className="text-xl font-black text-center text-gray-800 mb-2">確定要清空所有訂單嗎？</h3>
+            <p className="text-center text-red-600 font-bold mb-6 text-sm bg-red-50 p-3 rounded-xl border border-red-100">
+              ⚠️ 警告：這個操作將會刪除「所有待製作」與「已完成」的訂單資料，且無法復原！
+            </p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsClearConfirmOpen(false)}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleClearAllOrders}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30 transition-colors"
+              >
+                確認清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
-  // 3. 設定畫面
+  // 4. 設定畫面
   const SettingsView = () => {
     const [formData, setFormData] = useState({
       gridSize: config.gridSize,
@@ -1031,13 +1143,13 @@ export default function App() {
       loadingMessage: config.loadingMessage || '✨ 氣球魔法師正在為您的專屬氣球注入魔法語...',
       maxWaitCount: config.maxWaitCount || 20,
       fullOrderMessage: config.fullOrderMessage || '很抱歉，因為活動時間有限，目前的氣球訂單已經滿載囉！期待下次再為您服務！🎈',
-      // 新增設定
       showVipSection: config.showVipSection || false,
       vipGridSize: config.vipGridSize || 12,
       vipThumbnailSize: config.vipThumbnailSize || 'md',
       vipBalloons: config.vipBalloons || [],
       bgStyle: config.bgStyle || '',
-      qrCodeUrl: config.qrCodeUrl || ''
+      qrCodeUrl: config.qrCodeUrl || '',
+      adminPin: config.adminPin || '8888' // 🌟 密碼鎖設定
     });
 
     const [editingBalloon, setEditingBalloon] = useState(null);
@@ -1064,14 +1176,17 @@ export default function App() {
     };
 
     const handleDeleteBalloon = (id, isVipList) => {
-      if(window.confirm("確定要刪除這個造型嗎？")) {
-        const listKey = isVipList ? 'vipBalloons' : 'balloons';
-        setFormData(prev => ({
-          ...prev,
-          [listKey]: prev[listKey].filter(b => b.id !== id)
-        }));
-        setEditingBalloon(null);
-      }
+      setConfirmAction({
+        message: '確定要刪除這個造型嗎？',
+        onConfirm: () => {
+          const listKey = isVipList ? 'vipBalloons' : 'balloons';
+          setFormData(prev => ({
+            ...prev,
+            [listKey]: prev[listKey].filter(b => b.id !== id)
+          }));
+          setEditingBalloon(null);
+        }
+      });
     };
 
     return (
@@ -1091,6 +1206,20 @@ export default function App() {
           {/* 基本顯示設定區塊 */}
           <div className="space-y-6">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">外觀與基本設定</h3>
+              
+              {/* 🌟 密碼鎖設定 */}
+              <div className="bg-red-50 p-4 rounded-xl border border-red-100 mb-4">
+                <label className="block text-sm font-bold text-red-700 mb-2 flex items-center gap-2"><Lock size={16}/> 管理員後台密碼 (PIN碼)</label>
+                <input 
+                  type="text" 
+                  value={formData.adminPin}
+                  onChange={(e) => setFormData({...formData, adminPin: e.target.value})}
+                  className="w-full max-w-xs border-2 border-red-200 rounded-xl px-4 py-3 focus:outline-none focus:border-red-500 font-black text-red-900 tracking-widest text-lg"
+                  placeholder="例如：8888"
+                />
+                <p className="text-xs text-red-500 mt-2 font-medium">為保護您的後台不被客人亂點，進入後台需輸入此密碼。（請務必記住喔！）</p>
+              </div>
+
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">APP 標題名稱</label>
                 <input 
@@ -1244,7 +1373,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 氣球造型目錄管理 (分為兩區) */}
+        {/* 氣球造型目錄管理 */}
         <div className="space-y-6">
             {/* 一般造型管理 */}
             <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
@@ -1372,37 +1501,99 @@ export default function App() {
 
   return (
     <div className="min-h-screen font-sans selection:bg-pink-200 selection:text-pink-900 transition-all duration-500" style={bgStyles}>
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-pink-100 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-rose-400 rounded-lg flex items-center justify-center text-white shadow-sm">
-              🎈
+      {/* Header - 獨立查詢模式不顯示 */}
+      {view !== 'tracker' && (
+          <header className="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-pink-100 shadow-sm">
+            <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-rose-400 rounded-lg flex items-center justify-center text-white shadow-sm">
+                  🎈
+                </div>
+                <h1 className="font-black text-gray-800 text-lg sm:text-xl tracking-tight">{config.title || '歡樂氣球工坊'}</h1>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={toggleFullscreen}
+                  className="p-2 text-gray-500 hover:text-indigo-600 bg-gray-50 hover:bg-indigo-50 rounded-full transition-colors hidden sm:flex"
+                  title="切換全螢幕"
+                >
+                  {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+                </button>
+                {view === 'guest' && (
+                    <button 
+                        onClick={() => setAdminPinModalOpen(true)}
+                        className="text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 px-4 py-1.5 rounded-full shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                    >
+                        <Lock size={14}/> 後台
+                    </button>
+                )}
+                {view === 'admin' && <div className="text-sm font-bold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">管理員後台</div>}
+                {view === 'settings' && <div className="text-sm font-bold text-gray-600 bg-gray-100 px-3 py-1.5 rounded-full">系統設定</div>}
+              </div>
             </div>
-            <h1 className="font-black text-gray-800 text-lg sm:text-xl tracking-tight">{config.title || '歡樂氣球工坊'}</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={toggleFullscreen}
-              className="p-2 text-gray-500 hover:text-indigo-600 bg-gray-50 hover:bg-indigo-50 rounded-full transition-colors hidden sm:flex"
-              title="切換全螢幕"
-            >
-              {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-            </button>
-            <div className="text-sm font-medium text-gray-600 bg-gray-100/80 backdrop-blur px-3 py-1.5 rounded-full border border-gray-200/50">
-              {view === 'guest' ? '現場點單區' : view === 'admin' ? '管理員後台' : '系統設定區'}
-            </div>
-          </div>
-        </div>
-      </header>
+          </header>
+      )}
 
       {/* Main Content */}
-      <main className="max-w-5xl mx-auto px-4 py-6">
+      <main className={`max-w-5xl mx-auto ${view === 'tracker' ? 'p-0' : 'px-4 py-6'}`}>
         {view === 'guest' && <GuestView />}
         {view === 'admin' && <AdminView />}
         {view === 'settings' && <SettingsView />}
+        {view === 'tracker' && <TrackerView />}
       </main>
       
+      {/* 🌟 全域客製化提示對話框 (Alert Modal) */}
+      {alertMessage && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
+                <Info size={48} className="mx-auto text-indigo-500 mb-4" />
+                <p className="text-gray-800 font-bold mb-6 text-lg leading-relaxed">{alertMessage}</p>
+                <button onClick={() => setAlertMessage('')} className="w-full py-3 px-4 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 transition-colors shadow-md">
+                    我知道了
+                </button>
+            </div>
+        </div>
+      )}
+
+      {/* 🌟 全域客製化確認對話框 (Confirm Modal) */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
+                <AlertCircle size={48} className="mx-auto text-red-500 mb-4" />
+                <p className="text-gray-800 font-bold mb-6 text-lg">{confirmAction.message}</p>
+                <div className="flex gap-3">
+                    <button onClick={() => setConfirmAction(null)} className="flex-1 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
+                    <button onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }} className="flex-1 py-3 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-md transition-colors">確定</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* 🌟 密碼鎖對話框 (PIN Modal) */}
+      {adminPinModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
+                <div className="mx-auto w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center text-gray-600 mb-4">
+                    <Lock size={32} />
+                </div>
+                <h3 className="text-xl font-black text-gray-800 mb-4">請輸入管理員密碼</h3>
+                <input
+                    type="password"
+                    autoFocus
+                    value={adminPinInput}
+                    onChange={(e) => setAdminPinInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAdminLogin(); }}
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-black text-center text-3xl tracking-widest mb-2"
+                />
+                {adminPinError && <p className="text-red-500 text-sm font-bold mb-4 animate-bounce">{adminPinError}</p>}
+                <div className="flex gap-3 mt-6">
+                    <button onClick={() => {setAdminPinModalOpen(false); setAdminPinError(''); setAdminPinInput('');}} className="flex-1 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
+                    <button onClick={handleAdminLogin} className="flex-1 py-3 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-md transition-colors">進入</button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* CSS 動畫與自定義樣式 */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
