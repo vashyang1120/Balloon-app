@@ -700,15 +700,6 @@ export default function App() {
         </div>
       </div>
 
-      {isOrderFull && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-600 p-4 rounded-2xl flex items-start gap-3 shadow-sm">
-              <AlertCircle className="shrink-0 mt-0.5" />
-              <div className="font-medium leading-relaxed">
-                  {config.fullOrderMessage}
-              </div>
-          </div>
-      )}
-
       {/* 🌟 魔法顧問按鈕 */}
       <div className="mb-6">
         <button 
@@ -798,6 +789,87 @@ export default function App() {
       )}
 
       {/* --- Modals --- */}
+
+      {/* 🌟 AI 魔法顧問 Modal */}
+      {isAiModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
+            <div className="w-16 h-16 mx-auto bg-fuchsia-100 text-fuchsia-500 rounded-full flex items-center justify-center mb-4 shadow-inner">
+              <Wand2 size={32} />
+            </div>
+            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">魔法顧問</h3>
+            <p className="text-center text-gray-500 mb-6 text-sm font-medium">
+              請告訴我您今天的心情，或是喜歡什麼動物、顏色？我來為您挑選最棒的造型！
+            </p>
+            
+            <textarea
+              value={aiQuery}
+              onChange={(e) => setAiQuery(e.target.value)}
+              placeholder="例如：我想要一個在天上飛的、或是粉紅色的可愛動物..."
+              className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl mb-6 focus:outline-none focus:border-fuchsia-500 resize-none h-24 font-medium"
+            />
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsAiModalOpen(false)}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                disabled={isAiLoading}
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleAiRecommend}
+                disabled={isAiLoading || !aiQuery.trim()}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-fuchsia-500 hover:bg-fuchsia-600 shadow-lg shadow-fuchsia-500/30 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
+              >
+                {isAiLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+                {isAiLoading ? '施法中...' : '為我推薦'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 確認點單 Modal */}
+      {selectedBalloon && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
+            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">確認造型</h3>
+            
+            {aiReason ? (
+              <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
+                <Sparkles size={16} className="text-fuchsia-500 shrink-0" />
+                <span>{aiReason}</span>
+              </div>
+            ) : (
+              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-lg">{selectedBalloon.name}</span>，確定要送出嗎？</p>
+            )}
+            
+            <div className={`w-32 h-32 mx-auto rounded-2xl flex items-center justify-center text-6xl mb-8 shadow-inner overflow-hidden ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
+              {isImageUrl(selectedBalloon.icon) ? (
+                <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
+              ) : (
+                selectedBalloon.icon
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setSelectedBalloon(null); setAiReason(''); }}
+                className="flex-1 py-4 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-lg"
+              >
+                重新選擇
+              </button>
+              <button 
+                onClick={() => handlePlaceOrder(selectedBalloon)}
+                className="flex-1 py-4 px-4 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 shadow-lg shadow-pink-500/30 transition-all active:scale-95 text-lg"
+              >
+                確定送出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* 🌟 更改造型 Modal */}
       {isChangeOrderModalOpen && (
