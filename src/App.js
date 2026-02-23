@@ -160,7 +160,7 @@ export default function App() {
   const [settingsData, setSettingsData] = useState(null);
   const [editingBalloon, setEditingBalloon] = useState(null);
   const [editingCatalogId, setEditingCatalogId] = useState(null);
-  const [tempCatalogSize, setTempCatalogSize] = useState(""); // 🌟 新增：目錄內快速數量設定
+  const [tempCatalogSize, setTempCatalogSize] = useState(""); 
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -216,6 +216,7 @@ export default function App() {
       if (docSnap.exists()) {
         let data = docSnap.data();
         
+        // 資料庫目錄遷移邏輯與預設值防呆
         if (!data.catalogs) {
             data.catalogs = [
                 { id: 'cat-general', name: '預設一般選單', balloons: data.balloons || DEFAULT_BALLOONS },
@@ -251,6 +252,7 @@ export default function App() {
     };
   }, [user]);
 
+  // --- 核心等待時間計算函式 ---
   const getWaitTimeForQueue = (queue) => {
       return queue.reduce((sum, o) => sum + (o.isVip ? (config.vipTimePerItem || 5) : (config.timePerItem || 3)), 0);
   };
@@ -260,6 +262,7 @@ export default function App() {
   const estimatedWaitTime = getWaitTimeForQueue(pendingOrders);
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
+  // --- 目錄轉換顯示邏輯 ---
   const displayBalloons = useMemo(() => {
     const combined = [];
     (config.activeGeneralCatalogs || []).forEach(catId => {
@@ -278,15 +281,36 @@ export default function App() {
     return combined.slice(0, config.vipGridSize);
   }, [config.activeVipCatalogs, config.catalogs, config.vipGridSize]);
 
-  const allAvailableBalloons = useMemo(() => {
-    const combined = [...displayBalloons];
-    if (config.showVipSection) {
+  // 🌟 用於階段 1：讓客人選擇他原本預訂的造型 (包含所有啟用的目錄，確保他一定能找到他原本選的)
+  const allActiveBalloons = useMemo(() => {
+    const combined = [];
+    const addBalloons = (catalogIds) => {
+        (catalogIds || []).forEach(catId => {
+            const cat = (config.catalogs || []).find(c => c.id === catId);
+            if (cat) {
+                cat.balloons.forEach(b => {
+                    if (!combined.find(existing => existing.id === b.id)) combined.push(b);
+                });
+            }
+        });
+    };
+    addBalloons(config.activeGeneralCatalogs);
+    addBalloons(config.activeVipCatalogs);
+    return combined;
+  }, [config.catalogs, config.activeGeneralCatalogs, config.activeVipCatalogs]);
+
+  // 🌟 用於階段 2：讓客人選擇新的造型 (依照他是否為 VIP 來決定顯示範圍)
+  const allowedNewBalloons = useMemo(() => {
+    if (!verifiedOrderForChange) return [];
+    const combined = [...displayBalloons]; // 一般客人都看得到一般顯示造型
+    if (verifiedOrderForChange.isVip) {
+        // 如果原本是 VIP 訂單，則額外加入 VIP 造型讓他選
         displayVipBalloons.forEach(vb => {
             if (!combined.find(b => b.id === vb.id)) combined.push(vb);
         });
     }
     return combined;
-  }, [displayBalloons, displayVipBalloons, config.showVipSection]);
+  }, [verifiedOrderForChange, displayBalloons, displayVipBalloons]);
 
   const isImageUrl = (str) => typeof str === 'string' && (str.startsWith('http') || str.startsWith('data:'));
 
@@ -849,6 +873,259 @@ export default function App() {
           <div className="fixed bottom-6 right-6 z-40 w-24 h-24 sm:w-32 sm:h-32 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.15)] border-4 border-white bg-white hover:scale-110 transition-transform origin-bottom-right">
               <img src={getDisplayImageUrl(config.qrCodeUrl)} alt="QR Code" className="w-full h-full object-cover" />
           </div>
+      )}
+
+      {/* --- Modals --- */}
+
+      {/* 🌟 AI 魔法顧問 Modal */}
+      {isAiModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
+            <div className="w-16 h-16 mx-auto bg-fuchsia-100 text-fuchsia-500 rounded-full flex items-center justify-center mb-4 shadow-inner">
+              <Wand2 size={32} />
+            </div>
+            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">魔法顧問</h3>
+            <p className="text-center text-gray-500 mb-6 text-sm font-medium">
+              請告訴我您今天的心情，或是喜歡什麼動物、顏色？我來為您挑選最棒的造型！
+            </p>
+            
+            <textarea
+              value={aiQuery}
+              onChange={(e) => setAiQuery(e.target.value)}
+              placeholder="例如：我想要一個在天上飛的、或是粉紅色的可愛動物..."
+              className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl mb-6 focus:outline-none focus:border-fuchsia-500 resize-none h-24 font-medium"
+            />
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsAiModalOpen(false)}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                disabled={isAiLoading}
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleAiRecommend}
+                disabled={isAiLoading || !aiQuery.trim()}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-fuchsia-500 hover:bg-fuchsia-600 shadow-lg shadow-fuchsia-500/30 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
+              >
+                {isAiLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+                {isAiLoading ? '施法中...' : '為我推薦'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟🌟🌟 確認點單 Modal 🌟🌟🌟 */}
+      {selectedBalloon && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
+            <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-2">確認造型</h3>
+            
+            {aiReason ? (
+              <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
+                <Sparkles size={16} className="text-fuchsia-500 shrink-0" />
+                <span>{aiReason}</span>
+              </div>
+            ) : (
+              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
+            )}
+            
+            <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] mb-8 shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
+              {isImageUrl(selectedBalloon.icon) ? (
+                <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
+              ) : (
+                selectedBalloon.icon
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setSelectedBalloon(null); setAiReason(''); }}
+                className="flex-1 py-4 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-lg"
+              >
+                重新選擇
+              </button>
+              <button 
+                onClick={() => handlePlaceOrder(selectedBalloon)}
+                className="flex-1 py-4 px-4 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 shadow-lg shadow-pink-500/30 transition-all active:scale-95 text-lg"
+              >
+                確定送出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 更改造型 Modal */}
+      {isChangeOrderModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl scale-in-center overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <Edit3 className="text-indigo-500" /> 更改預訂造型
+                </h3>
+                <button onClick={() => {setIsChangeOrderModalOpen(false); setVerifiedOrderForChange(null); setNewSelectedBalloon(null); setChangeError(''); setChangeOrderNumber(''); setChangeOriginalBalloonId('');}} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
+                    <X size={20} />
+                </button>
+            </div>
+
+            {!verifiedOrderForChange ? (
+                <div className="space-y-6">
+                    <p className="text-sm text-gray-500">為了保護您的權益，請點選您的專屬號碼，並選擇您原本預訂的造型以進行驗證。</p>
+                    
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-3">1. 點選您的專屬號碼 (#)</label>
+                        {pendingOrders.length > 1 ? (
+                            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
+                                {pendingOrders.slice(1).map(o => (
+                                    <button 
+                                        key={o.id}
+                                        onClick={() => setChangeOrderNumber(o.orderNumber)}
+                                        className={`w-14 h-14 rounded-xl font-black text-xl border-2 transition-all shadow-sm ${
+                                            parseInt(changeOrderNumber) === o.orderNumber 
+                                            ? 'bg-indigo-500 text-white border-indigo-500 scale-105' 
+                                            : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50'
+                                        }`}
+                                    >
+                                        {o.orderNumber}
+                                    </button>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
+                                <p className="text-gray-500 font-medium">目前沒有可以更改的訂單喔！</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">2. 選擇原本預訂的造型</label>
+                        <select 
+                            value={changeOriginalBalloonId}
+                            onChange={(e) => setChangeOriginalBalloonId(e.target.value)}
+                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-lg font-medium text-gray-700 bg-white"
+                        >
+                            <option value="">請選擇原本的造型...</option>
+                            {allActiveBalloons.map(b => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {changeError && (
+                        <div className="text-red-600 text-sm font-bold bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2">
+                            <AlertCircle size={18} /> {changeError}
+                        </div>
+                    )}
+
+                    <button 
+                        onClick={handleVerifyOrderForChange}
+                        disabled={!changeOrderNumber || !changeOriginalBalloonId}
+                        className="w-full py-4 mt-2 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-lg"
+                    >
+                        驗證並開始更換
+                    </button>
+                </div>
+            ) : (
+                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="mb-6 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex justify-between items-center shadow-inner">
+                        <div>
+                            <p className="text-xs text-indigo-500 font-bold mb-1 uppercase tracking-wider">更換訂單</p>
+                            <p className="font-black text-3xl text-indigo-700">#{verifiedOrderForChange.orderNumber}</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-xs text-indigo-500 font-bold mb-1">原造型</p>
+                            <p className="font-bold text-indigo-400 line-through text-lg">{verifiedOrderForChange.balloonName}</p>
+                        </div>
+                    </div>
+
+                    <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">👇 請選擇新的造型</h4>
+                    <div className="grid grid-cols-3 gap-3 mb-6 max-h-60 overflow-y-auto p-1">
+                        {allowedNewBalloons.map(balloon => (
+                            <button
+                                key={balloon.id}
+                                onClick={() => setNewSelectedBalloon(balloon)}
+                                className={`flex flex-col items-center p-2 rounded-xl border-2 transition-all ${
+                                    newSelectedBalloon?.id === balloon.id 
+                                        ? 'border-indigo-500 bg-indigo-50 shadow-md scale-105' 
+                                        : 'border-gray-100 bg-white hover:border-indigo-300 shadow-sm'
+                                }`}
+                            >
+                                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-3xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
+                                    {isImageUrl(balloon.icon) ? (
+                                        <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
+                                    ) : (balloon.icon)}
+                                </div>
+                                <span className="text-xs font-bold text-gray-700 text-center leading-tight">{balloon.name}</span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <button 
+                        onClick={handleConfirmChangeOrder}
+                        disabled={!newSelectedBalloon}
+                        className="w-full py-4 rounded-xl font-bold text-white bg-green-500 hover:bg-green-600 shadow-lg shadow-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-lg flex justify-center items-center gap-2"
+                    >
+                        <CheckCircle2 size={20} />
+                        確定更換為 {newSelectedBalloon?.name || '...'}
+                    </button>
+                </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 點單成功 Modal */}
+      {successOrder && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in duration-300">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-pink-400 to-indigo-500"></div>
+            
+            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-500 mb-4 shadow-inner">
+              <PartyPopper size={32} />
+            </div>
+            
+            <h3 className="text-2xl font-bold text-gray-800 mb-1">點單成功！</h3>
+            <p className="text-gray-500 mb-6 font-medium text-sm">若您已加入官方 LINE<br/>可以點擊選單查詢即時製作進度喔！</p>
+            
+            <div className="bg-pink-50 border-2 border-pink-200 rounded-2xl p-6 mb-6 relative">
+              {successOrder.isVip && (
+                  <div className="absolute -top-3 -right-3 bg-gradient-to-r from-yellow-400 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1">
+                      <Crown size={12} /> VIP 優先
+                  </div>
+              )}
+              <p className="text-sm text-pink-600 font-medium mb-1">您的專屬號碼</p>
+              <p className="text-6xl font-black text-pink-500 mb-4">#{successOrder.orderNumber}</p>
+              
+              <div className="flex items-center justify-center gap-2 text-gray-600 font-medium bg-white py-2 px-4 rounded-lg inline-flex shadow-sm">
+                {isImageUrl(successOrder.icon) ? (
+                  <img src={getDisplayImageUrl(successOrder.icon)} alt={successOrder.balloonName} className="w-6 h-6 object-cover rounded-md" />
+                ) : (
+                  <span className="text-2xl">{successOrder.icon}</span>
+                )}
+                <span>{successOrder.balloonName}</span>
+              </div>
+            </div>
+
+            {successOrder.story && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-6 text-left relative overflow-hidden">
+                <Sparkles size={80} className="absolute -top-4 -right-4 text-indigo-100 opacity-50" />
+                <p className="text-sm text-indigo-800 font-medium leading-relaxed relative z-10">
+                  {successOrder.story}
+                </p>
+              </div>
+            )}
+
+            <button 
+              onClick={() => setSuccessOrder(null)}
+              className="w-full py-4 px-4 rounded-xl font-bold text-white bg-gray-900 hover:bg-black shadow-lg transition-colors text-lg"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
