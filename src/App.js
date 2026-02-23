@@ -120,8 +120,8 @@ export default function App() {
     bgStyle: '',
     qrCodeUrl: '',
     trackerImageUrl: 'https://drive.google.com/file/d/1Q3zAkstT3E8HkdEz_bhVGEA0EBNSg4VW/view?usp=drive_link', 
-    completedButtonText: '回到氣球小V官網', // 🌟 新增完成按鈕文字
-    completedButtonUrl: 'https://balloonv.com/', // 🌟 新增完成按鈕連結
+    completedButtonText: '回到氣球小V官網', 
+    completedButtonUrl: 'https://balloonv.com/', 
     vipModeActive: false,
     adminPin: '8888',
     catalogs: [
@@ -160,6 +160,7 @@ export default function App() {
   const [settingsData, setSettingsData] = useState(null);
   const [editingBalloon, setEditingBalloon] = useState(null);
   const [editingCatalogId, setEditingCatalogId] = useState(null);
+  const [tempCatalogSize, setTempCatalogSize] = useState(""); // 🌟 新增：目錄內快速數量設定
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -215,7 +216,6 @@ export default function App() {
       if (docSnap.exists()) {
         let data = docSnap.data();
         
-        // 資料庫目錄遷移邏輯與預設值防呆
         if (!data.catalogs) {
             data.catalogs = [
                 { id: 'cat-general', name: '預設一般選單', balloons: data.balloons || DEFAULT_BALLOONS },
@@ -251,7 +251,6 @@ export default function App() {
     };
   }, [user]);
 
-  // --- 核心等待時間計算函式 ---
   const getWaitTimeForQueue = (queue) => {
       return queue.reduce((sum, o) => sum + (o.isVip ? (config.vipTimePerItem || 5) : (config.timePerItem || 3)), 0);
   };
@@ -261,7 +260,6 @@ export default function App() {
   const estimatedWaitTime = getWaitTimeForQueue(pendingOrders);
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
-  // --- 目錄轉換顯示邏輯 ---
   const displayBalloons = useMemo(() => {
     const combined = [];
     (config.activeGeneralCatalogs || []).forEach(catId => {
@@ -314,7 +312,6 @@ export default function App() {
     return { background: config.bgStyle };
   }, [config.bgStyle]);
 
-  // --- API 與事件處理 ---
   const callGeminiAPI = async (prompt, isJson = false) => {
     const apiKey = ""; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -463,6 +460,7 @@ export default function App() {
       await Promise.all(promises);
       setIsClearConfirmOpen(false); 
       setTrackSelectedNum(null);
+      setAlertMessage("🎉 所有訂單資料已成功清空！");
     } catch (error) {
       console.error("Error clearing all orders:", error);
       setAlertMessage("清空失敗，請稍後再試。");
@@ -562,7 +560,7 @@ export default function App() {
 
   // --- 畫面渲染函式 ---
 
-  // 1. 🌟 獨立查詢進度畫面
+  // 1. 獨立查詢進度畫面
   const renderTrackerView = () => {
     const selectableOrders = [...pendingOrders, ...orders.filter(o => o.status === 'completed').slice(-15)].sort((a,b) => a.orderNumber - b.orderNumber);
 
@@ -601,7 +599,6 @@ export default function App() {
     const trackedOrder = orders.find(o => o.orderNumber === trackSelectedNum);
     const trackedIndex = trackedOrder ? pendingOrders.findIndex(o => o.id === trackedOrder.id) : -1;
     
-    // 精準計算自己專屬的等待時間
     let myWaitTime = 0;
     if (trackedOrder && trackedOrder.status === 'pending') {
         const queueAheadAndMe = pendingOrders.slice(0, trackedIndex + 1);
@@ -637,7 +634,6 @@ export default function App() {
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
                         
-                        {/* 宣傳圖片 */}
                         {config.trackerImageUrl && (
                             <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                                 <img 
@@ -648,7 +644,6 @@ export default function App() {
                             </div>
                         )}
 
-                        {/* 🌟 官網跳轉按鈕 */}
                         {(config.completedButtonText && config.completedButtonUrl) && (
                             <a
                                 href={config.completedButtonUrl}
@@ -712,7 +707,6 @@ export default function App() {
   const renderGuestView = () => (
     <div className="pb-8 relative">
       
-      {/* 👑 VIP 模式橫幅 */}
       {config.vipModeActive && (
           <div className="bg-gradient-to-r from-amber-400 to-yellow-500 text-white font-bold py-3 px-4 rounded-2xl mb-4 shadow-lg flex items-center justify-center gap-2 animate-pulse">
               <Crown size={24} />
@@ -721,10 +715,7 @@ export default function App() {
           </div>
       )}
 
-      {/* 🌟 狀態列與現正製作 */}
       <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-sm p-4 mb-4 border border-pink-100 flex flex-col gap-4">
-        
-        {/* 現正製作 Bar */}
         <div className="flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-xl shadow-md">
             <div className="flex items-center gap-2 sm:gap-3">
                 <Sparkles size={24} className="animate-pulse text-yellow-300" />
@@ -735,7 +726,6 @@ export default function App() {
             </div>
         </div>
 
-        {/* 數據與按鈕 */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-around">
                 <div className="flex items-center gap-2 text-pink-600">
@@ -777,7 +767,6 @@ export default function App() {
           </div>
       )}
 
-      {/* 🌟 魔法顧問按鈕 */}
       <div className="mb-6">
         <button 
           onClick={() => {
@@ -795,7 +784,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* 👑 VIP 專區 */}
       {config.showVipSection && displayVipBalloons.length > 0 && (
           <div className="mb-8 bg-gradient-to-br from-yellow-50 to-amber-50 p-4 sm:p-6 rounded-3xl border border-yellow-200 shadow-sm relative">
               <h2 className="text-xl font-black text-amber-700 mb-4 flex items-center gap-2 drop-shadow-sm">
@@ -832,7 +820,6 @@ export default function App() {
           </div>
       )}
 
-      {/* 氣球網格 (一般造型) */}
       <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 bg-white/60 inline-block px-4 py-2 rounded-xl backdrop-blur-sm border border-white/50 shadow-sm">
         ✨ 選擇您想要的氣球造型
       </h2>
@@ -858,265 +845,10 @@ export default function App() {
         ))}
       </div>
 
-      {/* 📌 QR Code 浮動區塊 */}
       {config.qrCodeUrl && (
           <div className="fixed bottom-6 right-6 z-40 w-24 h-24 sm:w-32 sm:h-32 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.15)] border-4 border-white bg-white hover:scale-110 transition-transform origin-bottom-right">
               <img src={getDisplayImageUrl(config.qrCodeUrl)} alt="QR Code" className="w-full h-full object-cover" />
           </div>
-      )}
-
-      {/* --- Modals --- */}
-
-      {/* 🌟 AI 魔法顧問 Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <div className="w-16 h-16 mx-auto bg-fuchsia-100 text-fuchsia-500 rounded-full flex items-center justify-center mb-4 shadow-inner">
-              <Wand2 size={32} />
-            </div>
-            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">魔法顧問</h3>
-            <p className="text-center text-gray-500 mb-6 text-sm font-medium">
-              請告訴我您今天的心情，或是喜歡什麼動物、顏色？我來為您挑選最棒的造型！
-            </p>
-            
-            <textarea
-              value={aiQuery}
-              onChange={(e) => setAiQuery(e.target.value)}
-              placeholder="例如：我想要一個在天上飛的、或是粉紅色的可愛動物..."
-              className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl mb-6 focus:outline-none focus:border-fuchsia-500 resize-none h-24 font-medium"
-            />
-
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setIsAiModalOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-                disabled={isAiLoading}
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleAiRecommend}
-                disabled={isAiLoading || !aiQuery.trim()}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-fuchsia-500 hover:bg-fuchsia-600 shadow-lg shadow-fuchsia-500/30 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
-              >
-                {isAiLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-                {isAiLoading ? '施法中...' : '為我推薦'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 確認點單 Modal */}
-      {selectedBalloon && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
-            <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-2">確認造型</h3>
-            
-            {aiReason ? (
-              <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
-                <Sparkles size={16} className="text-fuchsia-500 shrink-0" />
-                <span>{aiReason}</span>
-              </div>
-            ) : (
-              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
-            )}
-            
-            {/* 圖片容器放得非常大，並加上精緻的外框 */}
-            <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] mb-8 shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
-              {isImageUrl(selectedBalloon.icon) ? (
-                <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
-              ) : (
-                selectedBalloon.icon
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button 
-                onClick={() => { setSelectedBalloon(null); setAiReason(''); }}
-                className="flex-1 py-4 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-lg"
-              >
-                重新選擇
-              </button>
-              <button 
-                onClick={() => handlePlaceOrder(selectedBalloon)}
-                className="flex-1 py-4 px-4 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 shadow-lg shadow-pink-500/30 transition-all active:scale-95 text-lg"
-              >
-                確定送出
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* 更改造型 Modal */}
-      {isChangeOrderModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl scale-in-center overflow-y-auto max-h-[90vh]">
-            <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <Edit3 className="text-indigo-500" /> 更改預訂造型
-                </h3>
-                <button onClick={() => {setIsChangeOrderModalOpen(false); setVerifiedOrderForChange(null); setNewSelectedBalloon(null); setChangeError(''); setChangeOrderNumber(''); setChangeOriginalBalloonId('');}} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors">
-                    <X size={20} />
-                </button>
-            </div>
-
-            {!verifiedOrderForChange ? (
-                <div className="space-y-6">
-                    <p className="text-sm text-gray-500">為了保護您的權益，請點選您的專屬號碼，並選擇您原本預訂的造型以進行驗證。</p>
-                    
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-3">1. 點選您的專屬號碼 (#)</label>
-                        {pendingOrders.length > 1 ? (
-                            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
-                                {pendingOrders.slice(1).map(o => (
-                                    <button 
-                                        key={o.id}
-                                        onClick={() => setChangeOrderNumber(o.orderNumber)}
-                                        className={`w-14 h-14 rounded-xl font-black text-xl border-2 transition-all shadow-sm ${
-                                            parseInt(changeOrderNumber) === o.orderNumber 
-                                            ? 'bg-indigo-500 text-white border-indigo-500 scale-105' 
-                                            : 'bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50'
-                                        }`}
-                                    >
-                                        {o.orderNumber}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
-                                <p className="text-gray-500 font-medium">目前沒有可以更改的訂單喔！</p>
-                            </div>
-                        )}
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">2. 選擇原本預訂的造型</label>
-                        <select 
-                            value={changeOriginalBalloonId}
-                            onChange={(e) => setChangeOriginalBalloonId(e.target.value)}
-                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-lg font-medium text-gray-700 bg-white"
-                        >
-                            <option value="">請選擇原本的造型...</option>
-                            {allAvailableBalloons.map(b => (
-                                <option key={b.id} value={b.id}>{b.name}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {changeError && (
-                        <div className="text-red-600 text-sm font-bold bg-red-50 p-3 rounded-xl border border-red-100 flex items-center gap-2">
-                            <AlertCircle size={18} /> {changeError}
-                        </div>
-                    )}
-
-                    <button 
-                        onClick={handleVerifyOrderForChange}
-                        disabled={!changeOrderNumber || !changeOriginalBalloonId}
-                        className="w-full py-4 mt-2 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-lg"
-                    >
-                        驗證並開始更換
-                    </button>
-                </div>
-            ) : (
-                <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-                    <div className="mb-6 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex justify-between items-center shadow-inner">
-                        <div>
-                            <p className="text-xs text-indigo-500 font-bold mb-1 uppercase tracking-wider">更換訂單</p>
-                            <p className="font-black text-3xl text-indigo-700">#{verifiedOrderForChange.orderNumber}</p>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-xs text-indigo-500 font-bold mb-1">原造型</p>
-                            <p className="font-bold text-indigo-400 line-through text-lg">{verifiedOrderForChange.balloonName}</p>
-                        </div>
-                    </div>
-
-                    <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">👇 請選擇新的造型</h4>
-                    <div className="grid grid-cols-3 gap-3 mb-6 max-h-60 overflow-y-auto p-1">
-                        {allAvailableBalloons.map(balloon => (
-                            <button
-                                key={balloon.id}
-                                onClick={() => setNewSelectedBalloon(balloon)}
-                                className={`flex flex-col items-center p-2 rounded-xl border-2 transition-all ${
-                                    newSelectedBalloon?.id === balloon.id 
-                                        ? 'border-indigo-500 bg-indigo-50 shadow-md scale-105' 
-                                        : 'border-gray-100 bg-white hover:border-indigo-300 shadow-sm'
-                                }`}
-                            >
-                                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-3xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
-                                    {isImageUrl(balloon.icon) ? (
-                                        <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
-                                    ) : (balloon.icon)}
-                                </div>
-                                <span className="text-xs font-bold text-gray-700 text-center leading-tight">{balloon.name}</span>
-                            </button>
-                        ))}
-                    </div>
-
-                    <button 
-                        onClick={handleConfirmChangeOrder}
-                        disabled={!newSelectedBalloon}
-                        className="w-full py-4 rounded-xl font-bold text-white bg-green-500 hover:bg-green-600 shadow-lg shadow-green-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 text-lg flex justify-center items-center gap-2"
-                    >
-                        <CheckCircle2 size={20} />
-                        確定更換為 {newSelectedBalloon?.name || '...'}
-                    </button>
-                </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 點單成功 Modal */}
-      {successOrder && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in duration-300">
-          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-pink-400 to-indigo-500"></div>
-            
-            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-500 mb-4 shadow-inner">
-              <PartyPopper size={32} />
-            </div>
-            
-            <h3 className="text-2xl font-bold text-gray-800 mb-1">點單成功！</h3>
-            <p className="text-gray-500 mb-6 font-medium text-sm">若您已加入官方 LINE<br/>可以點擊選單查詢即時製作進度喔！</p>
-            
-            <div className="bg-pink-50 border-2 border-pink-200 rounded-2xl p-6 mb-6 relative">
-              {successOrder.isVip && (
-                  <div className="absolute -top-3 -right-3 bg-gradient-to-r from-yellow-400 to-amber-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md flex items-center gap-1">
-                      <Crown size={12} /> VIP 優先
-                  </div>
-              )}
-              <p className="text-sm text-pink-600 font-medium mb-1">您的專屬號碼</p>
-              <p className="text-6xl font-black text-pink-500 mb-4">#{successOrder.orderNumber}</p>
-              
-              <div className="flex items-center justify-center gap-2 text-gray-600 font-medium bg-white py-2 px-4 rounded-lg inline-flex shadow-sm">
-                {isImageUrl(successOrder.icon) ? (
-                  <img src={getDisplayImageUrl(successOrder.icon)} alt={successOrder.balloonName} className="w-6 h-6 object-cover rounded-md" />
-                ) : (
-                  <span className="text-2xl">{successOrder.icon}</span>
-                )}
-                <span>{successOrder.balloonName}</span>
-              </div>
-            </div>
-
-            {successOrder.story && (
-              <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-6 text-left relative overflow-hidden">
-                <Sparkles size={80} className="absolute -top-4 -right-4 text-indigo-100 opacity-50" />
-                <p className="text-sm text-indigo-800 font-medium leading-relaxed relative z-10">
-                  {successOrder.story}
-                </p>
-              </div>
-            )}
-
-            <button 
-              onClick={() => setSuccessOrder(null)}
-              className="w-full py-4 px-4 rounded-xl font-bold text-white bg-gray-900 hover:bg-black shadow-lg transition-colors text-lg"
-            >
-              我知道了
-            </button>
-          </div>
-        </div>
       )}
     </div>
   );
@@ -1139,7 +871,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* 👑 VIP 控制面板 */}
       <div className="bg-gradient-to-r from-amber-400 to-yellow-500 rounded-2xl shadow-md p-5 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-white">
               <h3 className="font-black text-xl flex items-center gap-2 drop-shadow-sm"><Crown size={24}/> VIP 優先預訂模式</h3>
@@ -1217,7 +948,6 @@ export default function App() {
         )}
       </div>
       
-      {/* 已完成訂單預覽 */}
       <div className="mt-8 opacity-80">
         <h3 className="text-sm font-bold text-gray-600 mb-3 px-2 flex items-center justify-between">
           已完成的訂單 ({orders.filter(o => o.status === 'completed').length} 筆)
@@ -1241,7 +971,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* 清空所有資料按鈕 */}
       <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
         <button 
           onClick={() => setIsClearConfirmOpen(true)}
@@ -1289,6 +1018,7 @@ export default function App() {
             catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: [...c.balloons, newBalloon] } : c)
         }));
         setEditingBalloon({ ...newBalloon, catId });
+        setTempCatalogSize(prev => (parseInt(prev) || 0) + 1); // 🌟 同步更新數量
     };
 
     const handleUpdateBalloonInCatalog = (updatedBalloon) => {
@@ -1314,8 +1044,62 @@ export default function App() {
                     } : c)
                 }));
                 setEditingBalloon(null);
+                setTempCatalogSize(prev => Math.max(0, (parseInt(prev) || 1) - 1)); // 🌟 同步更新數量
             }
         });
+    };
+
+    // 🌟 一鍵清空指定目錄
+    const handleClearCatalogBalloons = (catId) => {
+        setConfirmAction({
+            message: '確定要清空這個目錄裡「所有」的造型嗎？',
+            onConfirm: () => {
+                setSettingsData(prev => ({
+                    ...prev,
+                    catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: [] } : c)
+                }));
+                setTempCatalogSize("0");
+            }
+        });
+    };
+
+    // 🌟 快速設定目錄造型數量
+    const handleSetCatalogSize = (catId, newSize) => {
+        const cat = settingsData.catalogs.find(c => c.id === catId);
+        const currentSize = cat.balloons.length;
+
+        if (newSize === currentSize) return;
+
+        if (newSize > currentSize) {
+            // 自動補齊不足的數量
+            const addedBalloons = Array.from({ length: newSize - currentSize }).map((_, i) => ({
+                id: (cat.balloons.length > 0 ? Math.max(...cat.balloons.map(b => b.id)) : 0) + i + 1,
+                name: '新造型',
+                icon: '🎈',
+                color: 'bg-gray-100 text-gray-600'
+            }));
+            setSettingsData(prev => ({
+                ...prev,
+                catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: [...c.balloons, ...addedBalloons] } : c)
+            }));
+            setTempCatalogSize(newSize.toString());
+            setAlertMessage(`成功！已為您自動新增 ${newSize - currentSize} 個新造型欄位，請點擊編輯設定圖片與名稱。`);
+        } else {
+            // 縮減數量需再次確認
+            setConfirmAction({
+                message: `確定要將數量縮減為 ${newSize} 個嗎？這將會刪除排在最後面的 ${currentSize - newSize} 個造型喔！`,
+                onConfirm: () => {
+                    setSettingsData(prev => ({
+                        ...prev,
+                        catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: c.balloons.slice(0, newSize) } : c)
+                    }));
+                    setTempCatalogSize(newSize.toString());
+                },
+                onCancel: () => {
+                    setTempCatalogSize(currentSize.toString()); // 復原輸入框數字
+                }
+            });
+        }
     };
 
     return (
@@ -1332,7 +1116,6 @@ export default function App() {
 
         <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 space-y-8 mb-6">
           
-          {/* 基本顯示設定區塊 */}
           <div className="space-y-6">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">外觀與基本設定</h3>
               
@@ -1381,7 +1164,6 @@ export default function App() {
                 <p className="text-xs text-gray-400 mt-1">顯示在客人查詢進度「完成畫面」的下方。建議尺寸：寬度 800px。</p>
               </div>
 
-              {/* 🌟 完成畫面按鈕設定 */}
               <div className="grid sm:grid-cols-2 gap-4 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
                 <div className="col-span-full">
                     <label className="block text-sm font-bold text-indigo-800 mb-1 flex items-center gap-1"><ExternalLink size={16}/> 完成畫面底部按鈕</label>
@@ -1430,7 +1212,6 @@ export default function App() {
               </div>
           </div>
 
-          {/* 接單流程控管區塊 */}
           <div className="space-y-6 pt-6 border-t">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">接單流程控管設定</h3>
               
@@ -1480,12 +1261,10 @@ export default function App() {
               </div>
           </div>
 
-          {/* 🌟 選單顯示指派區塊 */}
           <div className="space-y-6 pt-6 border-t">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">前台選單顯示設定 (打勾決定要在前台展示的選單)</h3>
               
               <div className="grid sm:grid-cols-2 gap-8">
-                  {/* 一般區塊設定 */}
                   <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
                     <h4 className="font-bold text-indigo-700 mb-3 flex items-center gap-2"><ImageIcon size={18}/> 一般區塊顯示內容</h4>
                     <div className="space-y-2 mb-4 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-indigo-50">
@@ -1518,7 +1297,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* VIP區塊設定 */}
                   <div className="bg-yellow-50/50 p-4 rounded-2xl border border-yellow-200">
                     <div className="flex items-center justify-between mb-3">
                         <h4 className="font-bold text-yellow-700 flex items-center gap-2"><Crown size={18}/> VIP 區塊顯示內容</h4>
@@ -1595,24 +1373,58 @@ export default function App() {
                                 </span>
                                 <div className="flex gap-2">
                                     <button onClick={() => handleDeleteCatalog(cat.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18}/></button>
-                                    <button onClick={() => setEditingCatalogId(cat.id)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm transition-colors text-sm flex items-center gap-1"><Pencil size={14}/> 編輯內容</button>
+                                    <button onClick={() => { setEditingCatalogId(cat.id); setTempCatalogSize(cat.balloons.length.toString()); }} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm transition-colors text-sm flex items-center gap-1">
+                                        <Pencil size={14}/> 編輯內容
+                                    </button>
                                 </div>
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (
-                // 顯示單一目錄內的造型
+                // 🌟 顯示單一目錄內的造型 (加入數量設定器)
                 <div className="animate-in fade-in slide-in-from-right-4">
-                    <div className="flex items-center justify-between mb-6 bg-indigo-50 p-4 rounded-xl">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                         <div>
                             <p className="text-xs font-bold text-indigo-500 mb-1">正在編輯目錄內容</p>
                             <h4 className="font-black text-xl text-indigo-900">{settingsData.catalogs.find(c => c.id === editingCatalogId)?.name}</h4>
                         </div>
-                        <div className="flex gap-3">
-                            <button onClick={() => setEditingCatalogId(null)} className="px-4 py-2 bg-white text-indigo-600 font-bold rounded-xl shadow-sm hover:bg-indigo-100">返回清單</button>
-                            <button onClick={() => handleAddBalloonToCatalog(editingCatalogId)} className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-bold shadow-md">
-                                <Plus size={16} /> 新增造型
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                            
+                            {/* 🌟 快速數量設定器 */}
+                            <div className="flex items-center bg-white rounded-lg border border-indigo-200 shadow-sm overflow-hidden h-10">
+                                <span className="text-xs font-bold text-gray-500 px-3 bg-gray-50 h-full flex items-center border-r border-gray-100">總數量</span>
+                                <input 
+                                    type="number" 
+                                    value={tempCatalogSize}
+                                    onChange={(e) => setTempCatalogSize(e.target.value)}
+                                    className="w-16 text-center font-black text-indigo-700 focus:outline-none h-full"
+                                    min="0"
+                                />
+                                <button 
+                                    onClick={() => {
+                                        const newSize = parseInt(tempCatalogSize);
+                                        if (!isNaN(newSize) && newSize >= 0) handleSetCatalogSize(editingCatalogId, newSize);
+                                    }}
+                                    className="bg-indigo-100 text-indigo-700 hover:bg-indigo-500 hover:text-white px-4 h-full text-sm font-bold transition-colors"
+                                >
+                                    套用
+                                </button>
+                            </div>
+                            
+                            {/* 清空按鈕 */}
+                            <button onClick={() => handleClearCatalogBalloons(editingCatalogId)} className="h-10 px-3 bg-white text-red-500 rounded-lg shadow-sm hover:bg-red-50 border border-red-100 transition-colors flex items-center gap-1 font-bold text-sm" title="清空所有造型">
+                                <Trash2 size={16} /> <span className="hidden sm:inline">清空</span>
+                            </button>
+                            
+                            {/* 新增按鈕 */}
+                            <button onClick={() => handleAddBalloonToCatalog(editingCatalogId)} className="h-10 px-3 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 transition-colors flex items-center gap-1 font-bold text-sm" title="新增一個">
+                                <Plus size={16} /> <span className="hidden sm:inline">新增</span>
+                            </button>
+                            
+                            {/* 返回按鈕 */}
+                            <button onClick={() => { setEditingCatalogId(null); setTempCatalogSize(""); }} className="h-10 px-4 bg-white text-indigo-600 font-bold rounded-lg shadow-sm hover:bg-indigo-50 border border-indigo-100 transition-colors">
+                                完成返回
                             </button>
                         </div>
                     </div>
@@ -1632,7 +1444,7 @@ export default function App() {
                             </button>
                         ))}
                         {settingsData.catalogs.find(c => c.id === editingCatalogId)?.balloons.length === 0 && (
-                            <div className="col-span-full py-8 text-center text-gray-400 font-bold">這個目錄還是空的，快點擊右上角新增造型吧！</div>
+                            <div className="col-span-full py-8 text-center text-gray-400 font-bold">這個目錄還是空的，快在上方設定數量或點擊新增吧！</div>
                         )}
                     </div>
                 </div>
@@ -1766,14 +1578,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 全域客製化確認對話框 (Confirm Modal) */}
+      {/* 🌟 全域客製化確認對話框 (Confirm Modal) - 加入 onCancel 處理 */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
                 <AlertCircle size={48} className="mx-auto text-red-500 mb-4" />
                 <p className="text-gray-800 font-bold mb-6 text-lg">{confirmAction.message}</p>
                 <div className="flex gap-3">
-                    <button onClick={() => setConfirmAction(null)} className="flex-1 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
+                    <button onClick={() => { if (confirmAction.onCancel) confirmAction.onCancel(); setConfirmAction(null); }} className="flex-1 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">取消</button>
                     <button onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }} className="flex-1 py-3 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-md transition-colors">確定</button>
                 </div>
             </div>
