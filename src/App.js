@@ -17,7 +17,7 @@ import {
   updateDoc,
   deleteDoc
 } from 'firebase/firestore';
-import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info, FolderOpen } from 'lucide-react';
+import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info, FolderOpen, ExternalLink } from 'lucide-react';
 
 // --- 預設 36 個氣球造型資料 ---
 const DEFAULT_BALLOONS = [
@@ -108,7 +108,7 @@ export default function App() {
   const [config, setConfig] = useState({ 
     gridSize: 24, 
     timePerItem: 3, 
-    vipTimePerItem: 5, // 🌟 新增 VIP 獨立時間
+    vipTimePerItem: 5, 
     title: '歡樂氣球工坊', 
     thumbnailSize: 'md',
     loadingMessage: '✨ 氣球魔法師正在為您的專屬氣球注入魔法語...',
@@ -119,10 +119,11 @@ export default function App() {
     vipThumbnailSize: 'md',
     bgStyle: '',
     qrCodeUrl: '',
-    trackerImageUrl: 'https://drive.google.com/file/d/1Q3zAkstT3E8HkdEz_bhVGEA0EBNSg4VW/view?usp=drive_link', // 🌟 新增追蹤頁面圖片設定
+    trackerImageUrl: 'https://drive.google.com/file/d/1Q3zAkstT3E8HkdEz_bhVGEA0EBNSg4VW/view?usp=drive_link', 
+    completedButtonText: '回到氣球小V官網', // 🌟 新增完成按鈕文字
+    completedButtonUrl: 'https://balloonv.com/', // 🌟 新增完成按鈕連結
     vipModeActive: false,
     adminPin: '8888',
-    // 🌟 升級為目錄制
     catalogs: [
         { id: 'cat-gen', name: '預設一般選單', balloons: DEFAULT_BALLOONS }
     ],
@@ -152,10 +153,10 @@ export default function App() {
   // 清空訂單狀態
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
 
-  // 🌟 查詢進度狀態 (移至 App 層級，避免元件重新渲染時遺失狀態)
+  // 查詢進度狀態
   const [trackSelectedNum, setTrackSelectedNum] = useState(null);
 
-  // 🌟 Settings View 專屬狀態 (移至 App 層級)
+  // Settings View 專屬狀態 
   const [settingsData, setSettingsData] = useState(null);
   const [editingBalloon, setEditingBalloon] = useState(null);
   const [editingCatalogId, setEditingCatalogId] = useState(null);
@@ -214,7 +215,7 @@ export default function App() {
       if (docSnap.exists()) {
         let data = docSnap.data();
         
-        // 🌟 資料庫目錄遷移邏輯 (向下相容舊資料)
+        // 資料庫目錄遷移邏輯與預設值防呆
         if (!data.catalogs) {
             data.catalogs = [
                 { id: 'cat-general', name: '預設一般選單', balloons: data.balloons || DEFAULT_BALLOONS },
@@ -223,6 +224,8 @@ export default function App() {
             data.activeGeneralCatalogs = ['cat-general'];
             data.activeVipCatalogs = ['cat-vip'];
         }
+        if (!data.completedButtonText) data.completedButtonText = '回到氣球小V官網';
+        if (!data.completedButtonUrl) data.completedButtonUrl = 'https://balloonv.com/';
         
         setConfig(prev => ({ ...prev, ...data }));
       } else {
@@ -248,7 +251,7 @@ export default function App() {
     };
   }, [user]);
 
-  // --- 🌟 核心等待時間計算函式 ---
+  // --- 核心等待時間計算函式 ---
   const getWaitTimeForQueue = (queue) => {
       return queue.reduce((sum, o) => sum + (o.isVip ? (config.vipTimePerItem || 5) : (config.timePerItem || 3)), 0);
   };
@@ -598,7 +601,7 @@ export default function App() {
     const trackedOrder = orders.find(o => o.orderNumber === trackSelectedNum);
     const trackedIndex = trackedOrder ? pendingOrders.findIndex(o => o.id === trackedOrder.id) : -1;
     
-    // 🌟 精準計算自己專屬的等待時間 (包含前面所有人的時間 + 自己製作時間)
+    // 精準計算自己專屬的等待時間
     let myWaitTime = 0;
     if (trackedOrder && trackedOrder.status === 'pending') {
         const queueAheadAndMe = pendingOrders.slice(0, trackedIndex + 1);
@@ -633,6 +636,30 @@ export default function App() {
                             )}
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
+                        
+                        {/* 宣傳圖片 */}
+                        {config.trackerImageUrl && (
+                            <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
+                                <img 
+                                    src={getDisplayImageUrl(config.trackerImageUrl)} 
+                                    alt="活動資訊" 
+                                    className="w-full h-auto object-cover" 
+                                />
+                            </div>
+                        )}
+
+                        {/* 🌟 官網跳轉按鈕 */}
+                        {(config.completedButtonText && config.completedButtonUrl) && (
+                            <a
+                                href={config.completedButtonUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="mt-6 flex justify-center items-center gap-2 w-full py-4 px-4 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-lg shadow-indigo-500/30 transition-all active:scale-95 text-lg"
+                            >
+                                <ExternalLink size={20} />
+                                {config.completedButtonText}
+                            </a>
+                        )}
                     </div>
                 )}
 
@@ -643,7 +670,7 @@ export default function App() {
                             {trackedOrder.isVip && <span className="bg-amber-100 text-amber-700 text-sm px-3 py-1 rounded-lg flex items-center gap-1 font-black shadow-sm"><Crown size={16}/> VIP 優先</span>}
                         </h4>
                         
-                        <div className="flex items-center gap-4 mb-4 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                        <div className="flex items-center gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border border-gray-100">
                             <div className="w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden">
                                 {isImageUrl(trackedOrder.icon) ? <img src={getDisplayImageUrl(trackedOrder.icon)} alt="icon" className="w-full h-full object-cover"/> : trackedOrder.icon}
                             </div>
@@ -652,17 +679,6 @@ export default function App() {
                                 <p className="font-black text-xl text-gray-800">{trackedOrder.balloonName}</p>
                             </div>
                         </div>
-
-                        {/* 🌟 插入追蹤頁面的宣傳圖片 */}
-                        {config.trackerImageUrl && (
-                            <div className="mb-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
-                                <img 
-                                    src={getDisplayImageUrl(config.trackerImageUrl)} 
-                                    alt="活動資訊" 
-                                    className="w-full h-auto object-cover" 
-                                />
-                            </div>
-                        )}
                         
                         <div className="space-y-4">
                             {trackedIndex === 0 ? (
@@ -891,9 +907,9 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟🌟🌟 確認點單 Modal (大幅優化預覽圖片尺寸) 🌟🌟🌟 */}
+      {/* 確認點單 Modal */}
       {selectedBalloon && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
             <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-2">確認造型</h3>
             
@@ -906,8 +922,8 @@ export default function App() {
               <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
             )}
             
-            {/* 🔥 這裡把圖片容器放得非常大，並加上精緻的外框 🔥 */}
-            <div className={`w-56 h-56 sm:w-72 sm:h-72 mx-auto rounded-3xl flex items-center justify-center text-8xl mb-8 shadow-md border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
+            {/* 圖片容器放得非常大，並加上精緻的外框 */}
+            <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] mb-8 shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
               {isImageUrl(selectedBalloon.icon) ? (
                 <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
               ) : (
@@ -933,7 +949,7 @@ export default function App() {
         </div>
       )}
       
-      {/* 🌟 更改造型 Modal */}
+      {/* 更改造型 Modal */}
       {isChangeOrderModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl scale-in-center overflow-y-auto max-h-[90vh]">
@@ -1362,7 +1378,34 @@ export default function App() {
                   placeholder="請貼上宣傳圖的 Google Drive 連結"
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-gray-800"
                 />
-                <p className="text-xs text-gray-400 mt-1">顯示在客人查詢進度時的造型名稱下方。建議尺寸：寬度 800px，高度可依需求（推薦 800x600 或正方形 800x800）。</p>
+                <p className="text-xs text-gray-400 mt-1">顯示在客人查詢進度「完成畫面」的下方。建議尺寸：寬度 800px。</p>
+              </div>
+
+              {/* 🌟 完成畫面按鈕設定 */}
+              <div className="grid sm:grid-cols-2 gap-4 bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                <div className="col-span-full">
+                    <label className="block text-sm font-bold text-indigo-800 mb-1 flex items-center gap-1"><ExternalLink size={16}/> 完成畫面底部按鈕</label>
+                    <p className="text-xs text-indigo-600 mb-3">設定顯示在查詢進度「完成畫面」最下方的跳轉按鈕。</p>
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">按鈕文字</label>
+                    <input 
+                        type="text" 
+                        value={settingsData.completedButtonText || ''}
+                        onChange={(e) => setSettingsData({...settingsData, completedButtonText: e.target.value})}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                    />
+                </div>
+                <div>
+                    <label className="block text-xs font-bold text-gray-500 mb-1">按鈕跳轉連結 (URL)</label>
+                    <input 
+                        type="text" 
+                        value={settingsData.completedButtonUrl || ''}
+                        onChange={(e) => setSettingsData({...settingsData, completedButtonUrl: e.target.value})}
+                        className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                        placeholder="https://"
+                    />
+                </div>
               </div>
 
               <div>
