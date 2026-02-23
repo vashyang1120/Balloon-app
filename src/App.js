@@ -17,7 +17,7 @@ import {
   updateDoc,
   deleteDoc
 } from 'firebase/firestore';
-import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info } from 'lucide-react';
+import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info, FolderOpen } from 'lucide-react';
 
 // --- 預設 36 個氣球造型資料 ---
 const DEFAULT_BALLOONS = [
@@ -108,20 +108,26 @@ export default function App() {
   const [config, setConfig] = useState({ 
     gridSize: 24, 
     timePerItem: 3, 
-    balloons: DEFAULT_BALLOONS, 
+    vipTimePerItem: 5, // 🌟 新增 VIP 獨立時間
     title: '歡樂氣球工坊', 
     thumbnailSize: 'md',
     loadingMessage: '✨ 氣球魔法師正在為您的專屬氣球注入魔法語...',
     maxWaitCount: 20,
     fullOrderMessage: '很抱歉，因為活動時間有限，目前的氣球訂單已經滿載囉！期待下次再為您服務！🎈',
     showVipSection: false,
-    vipBalloons: [],
     vipGridSize: 12,
     vipThumbnailSize: 'md',
     bgStyle: '',
     qrCodeUrl: '',
+    trackerImageUrl: 'https://drive.google.com/file/d/1Q3zAkstT3E8HkdEz_bhVGEA0EBNSg4VW/view?usp=drive_link', // 🌟 新增追蹤頁面圖片設定
     vipModeActive: false,
-    adminPin: '8888' 
+    adminPin: '8888',
+    // 🌟 升級為目錄制
+    catalogs: [
+        { id: 'cat-gen', name: '預設一般選單', balloons: DEFAULT_BALLOONS }
+    ],
+    activeGeneralCatalogs: ['cat-gen'],
+    activeVipCatalogs: []
   });
   
   const [orders, setOrders] = useState([]);
@@ -146,15 +152,18 @@ export default function App() {
   // 清空訂單狀態
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
 
-  // 查詢進度狀態
-  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
-  const [trackOrderNumber, setTrackOrderNumber] = useState('');
+  // 🌟 查詢進度狀態 (移至 App 層級，避免元件重新渲染時遺失狀態)
+  const [trackSelectedNum, setTrackSelectedNum] = useState(null);
+
+  // 🌟 Settings View 專屬狀態 (移至 App 層級)
+  const [settingsData, setSettingsData] = useState(null);
+  const [editingBalloon, setEditingBalloon] = useState(null);
+  const [editingCatalogId, setEditingCatalogId] = useState(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // 🌟 全域系統提示與對話框狀態 (取代 alert 與 confirm)
   const [alertMessage, setAlertMessage] = useState('');
-  const [confirmAction, setConfirmAction] = useState(null); // { message: string, onConfirm: function }
+  const [confirmAction, setConfirmAction] = useState(null);
   const [adminPinModalOpen, setAdminPinModalOpen] = useState(false);
   const [adminPinInput, setAdminPinInput] = useState('');
   const [adminPinError, setAdminPinError] = useState('');
@@ -203,7 +212,19 @@ export default function App() {
     const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
     const unsubConfig = onSnapshot(configRef, (docSnap) => {
       if (docSnap.exists()) {
-        setConfig(prev => ({ ...prev, ...docSnap.data() }));
+        let data = docSnap.data();
+        
+        // 🌟 資料庫目錄遷移邏輯 (向下相容舊資料)
+        if (!data.catalogs) {
+            data.catalogs = [
+                { id: 'cat-general', name: '預設一般選單', balloons: data.balloons || DEFAULT_BALLOONS },
+                { id: 'cat-vip', name: '預設 VIP 選單', balloons: data.vipBalloons || [] }
+            ];
+            data.activeGeneralCatalogs = ['cat-general'];
+            data.activeVipCatalogs = ['cat-vip'];
+        }
+        
+        setConfig(prev => ({ ...prev, ...data }));
       } else {
         setDoc(configRef, config);
       }
@@ -227,19 +248,34 @@ export default function App() {
     };
   }, [user]);
 
-  // --- 計算衍生狀態 ---
+  // --- 🌟 核心等待時間計算函式 ---
+  const getWaitTimeForQueue = (queue) => {
+      return queue.reduce((sum, o) => sum + (o.isVip ? (config.vipTimePerItem || 5) : (config.timePerItem || 3)), 0);
+  };
+
   const pendingOrders = useMemo(() => orders.filter(o => o.status === 'pending'), [orders]);
   const waitingCount = pendingOrders.length;
-  const estimatedWaitTime = pendingOrders.reduce((totalTime, order) => totalTime + config.timePerItem, 0);
+  const estimatedWaitTime = getWaitTimeForQueue(pendingOrders);
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
+  // --- 目錄轉換顯示邏輯 ---
   const displayBalloons = useMemo(() => {
-    return (config.balloons || DEFAULT_BALLOONS).slice(0, config.gridSize);
-  }, [config.gridSize, config.balloons]);
+    const combined = [];
+    (config.activeGeneralCatalogs || []).forEach(catId => {
+        const cat = (config.catalogs || []).find(c => c.id === catId);
+        if (cat) combined.push(...cat.balloons);
+    });
+    return combined.slice(0, config.gridSize);
+  }, [config.activeGeneralCatalogs, config.catalogs, config.gridSize]);
 
   const displayVipBalloons = useMemo(() => {
-    return (config.vipBalloons || []).slice(0, config.vipGridSize);
-  }, [config.vipGridSize, config.vipBalloons]);
+    const combined = [];
+    (config.activeVipCatalogs || []).forEach(catId => {
+        const cat = (config.catalogs || []).find(c => c.id === catId);
+        if (cat) combined.push(...cat.balloons);
+    });
+    return combined.slice(0, config.vipGridSize);
+  }, [config.activeVipCatalogs, config.catalogs, config.vipGridSize]);
 
   const allAvailableBalloons = useMemo(() => {
     const combined = [...displayBalloons];
@@ -347,13 +383,13 @@ export default function App() {
     const newOrderNumber = maxOrderNum + 1;
     const isVipOrder = config.vipModeActive === true;
     
-    let currentWaitCount = 0;
+    let currentEstTime = 0;
     if (isVipOrder) {
-        currentWaitCount = pendingOrders.filter(o => o.isVip).length;
+        const vipsAhead = pendingOrders.filter(o => o.isVip);
+        currentEstTime = getWaitTimeForQueue(vipsAhead) + (config.vipTimePerItem || 5);
     } else {
-        currentWaitCount = pendingOrders.length;
+        currentEstTime = getWaitTimeForQueue(pendingOrders) + (config.timePerItem || 3);
     }
-    const currentEstTime = currentWaitCount * config.timePerItem;
 
     const newOrder = {
       orderNumber: newOrderNumber,
@@ -362,8 +398,6 @@ export default function App() {
       status: 'pending',
       timestamp: Date.now(),
       userId: user.uid,
-      estimatedWaitTime: currentEstTime,
-      waitingAhead: currentWaitCount,
       isVip: isVipOrder
     };
 
@@ -378,7 +412,7 @@ export default function App() {
       setSelectedBalloon(null);
       setAiReason('');
       
-      const initialSuccessOrder = { ...newOrder, icon: balloon.icon, story: config.loadingMessage };
+      const initialSuccessOrder = { ...newOrder, icon: balloon.icon, story: config.loadingMessage, estimatedWaitTime: currentEstTime };
       setSuccessOrder(initialSuccessOrder);
 
       const storyPrompt = `顧客剛點了一個名為「${balloon.name}」的造型氣球。請以「氣球魔法師」的口吻，用繁體中文寫一段簡短（約2-3句話）的可愛魔法物語或保養小叮嚀給這位顧客。例如：「你的狗狗氣球被施了快樂魔法！請記得多給它愛的抱抱，並且遠離尖銳的仙人掌喔！✨」`;
@@ -425,6 +459,7 @@ export default function App() {
       );
       await Promise.all(promises);
       setIsClearConfirmOpen(false); 
+      setTrackSelectedNum(null);
     } catch (error) {
       console.error("Error clearing all orders:", error);
       setAlertMessage("清空失敗，請稍後再試。");
@@ -484,11 +519,16 @@ export default function App() {
     }
   };
 
-  const handleSaveConfig = async (newConfigData) => {
-    if (!user) return;
+  const openSettings = () => {
+      setSettingsData({ ...config });
+      setView('settings');
+  };
+
+  const handleSaveConfig = async () => {
+    if (!user || !settingsData) return;
     try {
       const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
-      await setDoc(configRef, newConfigData);
+      await setDoc(configRef, settingsData);
       setView('admin');
     } catch (error) {
       console.error("Error saving config:", error);
@@ -517,19 +557,13 @@ export default function App() {
     );
   }
 
-  // --- 畫面元件 ---
+  // --- 畫面渲染函式 ---
 
-  // 1. 🌟 獨立查詢進度畫面 (提供給 LINE 連結用)
-  const TrackerView = () => {
-    const [selectedNum, setSelectedNum] = useState(null);
+  // 1. 🌟 獨立查詢進度畫面
+  const renderTrackerView = () => {
+    const selectableOrders = [...pendingOrders, ...orders.filter(o => o.status === 'completed').slice(-15)].sort((a,b) => a.orderNumber - b.orderNumber);
 
-    const selectableOrders = useMemo(() => {
-        const pendings = pendingOrders;
-        const completeds = orders.filter(o => o.status === 'completed').slice(-15);
-        return [...pendings, ...completeds].sort((a,b) => a.orderNumber - b.orderNumber);
-    }, [pendingOrders, orders]);
-
-    if (!selectedNum) {
+    if (!trackSelectedNum) {
         return (
             <div className="min-h-screen flex flex-col items-center p-4 pt-12 animate-in fade-in">
                 <div className="bg-white/90 backdrop-blur-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-indigo-100 w-full max-w-md">
@@ -543,7 +577,7 @@ export default function App() {
                         {selectableOrders.length > 0 ? selectableOrders.map(o => (
                             <button
                                 key={o.id}
-                                onClick={() => setSelectedNum(o.orderNumber)}
+                                onClick={() => setTrackSelectedNum(o.orderNumber)}
                                 className={`w-16 h-16 rounded-2xl font-black text-2xl border-2 transition-all shadow-sm active:scale-95 ${
                                     o.status === 'completed' 
                                     ? 'bg-green-50 text-green-600 border-green-200 hover:bg-green-100' 
@@ -553,7 +587,7 @@ export default function App() {
                                 {o.orderNumber}
                             </button>
                         )) : (
-                            <p className="text-gray-400 font-medium py-8">目前沒有進行中的訂單</p>
+                            <p className="text-gray-400 font-medium py-8">目前沒有可查詢的訂單</p>
                         )}
                     </div>
                 </div>
@@ -561,13 +595,20 @@ export default function App() {
         );
     }
 
-    const trackedOrder = orders.find(o => o.orderNumber === selectedNum);
+    const trackedOrder = orders.find(o => o.orderNumber === trackSelectedNum);
     const trackedIndex = trackedOrder ? pendingOrders.findIndex(o => o.id === trackedOrder.id) : -1;
+    
+    // 🌟 精準計算自己專屬的等待時間 (包含前面所有人的時間 + 自己製作時間)
+    let myWaitTime = 0;
+    if (trackedOrder && trackedOrder.status === 'pending') {
+        const queueAheadAndMe = pendingOrders.slice(0, trackedIndex + 1);
+        myWaitTime = getWaitTimeForQueue(queueAheadAndMe);
+    }
 
     return (
         <div className="min-h-screen flex flex-col items-center p-4 pt-12 animate-in fade-in slide-in-from-right-4">
             <div className="w-full max-w-md mb-4">
-                <button onClick={() => setSelectedNum(null)} className="text-indigo-600 font-bold flex items-center gap-1 bg-white/90 backdrop-blur-sm px-5 py-2.5 rounded-full shadow-md hover:bg-white active:scale-95 transition-all">
+                <button onClick={() => setTrackSelectedNum(null)} className="text-indigo-600 font-bold flex items-center gap-1 bg-white/90 backdrop-blur-sm px-5 py-2.5 rounded-full shadow-md hover:bg-white active:scale-95 transition-all">
                     <ChevronLeft size={20}/> 返回號碼列表
                 </button>
             </div>
@@ -602,7 +643,7 @@ export default function App() {
                             {trackedOrder.isVip && <span className="bg-amber-100 text-amber-700 text-sm px-3 py-1 rounded-lg flex items-center gap-1 font-black shadow-sm"><Crown size={16}/> VIP 優先</span>}
                         </h4>
                         
-                        <div className="flex items-center gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                        <div className="flex items-center gap-4 mb-4 bg-gray-50 p-4 rounded-2xl border border-gray-100">
                             <div className="w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden">
                                 {isImageUrl(trackedOrder.icon) ? <img src={getDisplayImageUrl(trackedOrder.icon)} alt="icon" className="w-full h-full object-cover"/> : trackedOrder.icon}
                             </div>
@@ -611,6 +652,17 @@ export default function App() {
                                 <p className="font-black text-xl text-gray-800">{trackedOrder.balloonName}</p>
                             </div>
                         </div>
+
+                        {/* 🌟 插入追蹤頁面的宣傳圖片 */}
+                        {config.trackerImageUrl && (
+                            <div className="mb-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
+                                <img 
+                                    src={getDisplayImageUrl(config.trackerImageUrl)} 
+                                    alt="活動資訊" 
+                                    className="w-full h-auto object-cover" 
+                                />
+                            </div>
+                        )}
                         
                         <div className="space-y-4">
                             {trackedIndex === 0 ? (
@@ -627,7 +679,7 @@ export default function App() {
                                     </div>
                                     <div className="flex justify-between items-center bg-pink-50 p-5 rounded-2xl border border-pink-100">
                                         <span className="text-pink-600 font-bold">預估還需等待</span>
-                                        <span className="text-4xl font-black text-pink-500">{trackedIndex * config.timePerItem} <span className="text-lg font-medium">分鐘</span></span>
+                                        <span className="text-4xl font-black text-pink-500">{myWaitTime} <span className="text-lg font-medium">分鐘</span></span>
                                     </div>
                                 </>
                             )}
@@ -640,8 +692,8 @@ export default function App() {
     );
   };
 
-  // 2. 賓客現場點單畫面 (主頁)
-  const GuestView = () => (
+  // 2. 賓客現場點單畫面
+  const renderGuestView = () => (
     <div className="pb-8 relative">
       
       {/* 👑 VIP 模式橫幅 */}
@@ -683,7 +735,7 @@ export default function App() {
                 <div className="flex items-center gap-2 text-indigo-600">
                     <div className="bg-indigo-100 p-2 rounded-full"><Clock size={20} /></div>
                     <div>
-                    <p className="text-xs sm:text-sm text-indigo-500 font-medium leading-none mb-1">預估時間</p>
+                    <p className="text-xs sm:text-sm text-indigo-500 font-medium leading-none mb-1">預估總耗時</p>
                     <p className="text-lg sm:text-xl font-bold leading-none">{estimatedWaitTime} <span className="text-xs sm:text-sm font-normal">分鐘</span></p>
                     </div>
                 </div>
@@ -699,6 +751,15 @@ export default function App() {
             </div>
         </div>
       </div>
+
+      {isOrderFull && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-600 p-4 rounded-2xl flex items-start gap-3 shadow-sm">
+              <AlertCircle className="shrink-0 mt-0.5" />
+              <div className="font-medium leading-relaxed">
+                  {config.fullOrderMessage}
+              </div>
+          </div>
+      )}
 
       {/* 🌟 魔法顧問按鈕 */}
       <div className="mb-6">
@@ -830,11 +891,11 @@ export default function App() {
         </div>
       )}
 
-      {/* 確認點單 Modal */}
+      {/* 🌟🌟🌟 確認點單 Modal (大幅優化預覽圖片尺寸) 🌟🌟🌟 */}
       {selectedBalloon && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">確認造型</h3>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
+            <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-2">確認造型</h3>
             
             {aiReason ? (
               <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
@@ -842,10 +903,11 @@ export default function App() {
                 <span>{aiReason}</span>
               </div>
             ) : (
-              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-lg">{selectedBalloon.name}</span>，確定要送出嗎？</p>
+              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
             )}
             
-            <div className={`w-32 h-32 mx-auto rounded-2xl flex items-center justify-center text-6xl mb-8 shadow-inner overflow-hidden ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
+            {/* 🔥 這裡把圖片容器放得非常大，並加上精緻的外框 🔥 */}
+            <div className={`w-56 h-56 sm:w-72 sm:h-72 mx-auto rounded-3xl flex items-center justify-center text-8xl mb-8 shadow-md border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
               {isImageUrl(selectedBalloon.icon) ? (
                 <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
               ) : (
@@ -1044,7 +1106,7 @@ export default function App() {
   );
 
   // 3. 管理員後台
-  const AdminView = () => (
+  const renderAdminView = () => (
     <div className="pb-8">
       <div className="flex items-center justify-between mb-6">
         <button 
@@ -1054,7 +1116,7 @@ export default function App() {
           <ChevronLeft size={20} /> 返回前台
         </button>
         <button 
-          onClick={() => setView('settings')}
+          onClick={openSettings}
           className="flex items-center gap-2 text-white bg-gray-800 hover:bg-black px-4 py-2 rounded-xl shadow-sm transition-colors font-medium"
         >
           <SettingsIcon size={18} /> 系統設定
@@ -1139,7 +1201,7 @@ export default function App() {
         )}
       </div>
       
-      {/* 已完成訂單預覽 (🌟 顯示全部並加上卷軸) */}
+      {/* 已完成訂單預覽 */}
       <div className="mt-8 opacity-80">
         <h3 className="text-sm font-bold text-gray-600 mb-3 px-2 flex items-center justify-between">
           已完成的訂單 ({orders.filter(o => o.status === 'completed').length} 筆)
@@ -1163,7 +1225,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 🌟 清空所有資料按鈕 */}
+      {/* 清空所有資料按鈕 */}
       <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
         <button 
           onClick={() => setIsClearConfirmOpen(true)}
@@ -1172,93 +1234,72 @@ export default function App() {
           <Trash2 size={20} /> 清空本次活動所有訂單資料
         </button>
       </div>
-
-      {/* 🌟 清空所有訂單確認 Modal (防呆機制) */}
-      {isClearConfirmOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-500 mb-4 shadow-inner">
-              <AlertCircle size={32} />
-            </div>
-            <h3 className="text-xl font-black text-center text-gray-800 mb-2">確定要清空所有訂單嗎？</h3>
-            <p className="text-center text-red-600 font-bold mb-6 text-sm bg-red-50 p-3 rounded-xl border border-red-100">
-              ⚠️ 警告：這個操作將會刪除「所有待製作」與「已完成」的訂單資料，且無法復原！
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setIsClearConfirmOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleClearAllOrders}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30 transition-colors"
-              >
-                確認清空
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 
   // 4. 設定畫面
-  const SettingsView = () => {
-    const [formData, setFormData] = useState({
-      gridSize: config.gridSize,
-      timePerItem: config.timePerItem,
-      balloons: config.balloons || DEFAULT_BALLOONS,
-      title: config.title || '歡樂氣球工坊',
-      thumbnailSize: config.thumbnailSize || 'md',
-      loadingMessage: config.loadingMessage || '✨ 氣球魔法師正在為您的專屬氣球注入魔法語...',
-      maxWaitCount: config.maxWaitCount || 20,
-      fullOrderMessage: config.fullOrderMessage || '很抱歉，因為活動時間有限，目前的氣球訂單已經滿載囉！期待下次再為您服務！🎈',
-      showVipSection: config.showVipSection || false,
-      vipGridSize: config.vipGridSize || 12,
-      vipThumbnailSize: config.vipThumbnailSize || 'md',
-      vipBalloons: config.vipBalloons || [],
-      bgStyle: config.bgStyle || '',
-      qrCodeUrl: config.qrCodeUrl || '',
-      adminPin: config.adminPin || '8888' // 🌟 密碼鎖設定
-    });
+  const renderSettingsView = () => {
+    if (!settingsData) return null;
 
-    const [editingBalloon, setEditingBalloon] = useState(null);
-
-    const handleAddBalloon = (isVipList = false) => {
-      const list = isVipList ? formData.vipBalloons : formData.balloons;
-      const newId = list.length > 0 ? Math.max(...list.map(b => b.id)) + 1 : 1;
-      const newBalloon = { id: newId, name: '新造型', icon: '🎈', color: 'bg-gray-100 text-gray-600' };
-      
-      setFormData(prev => ({
-          ...prev,
-          [isVipList ? 'vipBalloons' : 'balloons']: [...list, newBalloon]
-      }));
-      setEditingBalloon({ ...newBalloon, isVipList });
-    };
-
-    const handleUpdateBalloon = (updatedBalloon) => {
-      const listKey = updatedBalloon.isVipList ? 'vipBalloons' : 'balloons';
-      setFormData(prev => ({
-        ...prev,
-        [listKey]: prev[listKey].map(b => b.id === updatedBalloon.id ? updatedBalloon : b)
-      }));
-      setEditingBalloon(null);
-    };
-
-    const handleDeleteBalloon = (id, isVipList) => {
-      setConfirmAction({
-        message: '確定要刪除這個造型嗎？',
-        onConfirm: () => {
-          const listKey = isVipList ? 'vipBalloons' : 'balloons';
-          setFormData(prev => ({
+    const handleAddCatalog = () => {
+        const newId = 'cat-' + Date.now();
+        setSettingsData(prev => ({
             ...prev,
-            [listKey]: prev[listKey].filter(b => b.id !== id)
-          }));
-          setEditingBalloon(null);
-        }
-      });
+            catalogs: [...prev.catalogs, { id: newId, name: '新選單目錄', balloons: [] }]
+        }));
+    };
+
+    const handleDeleteCatalog = (catId) => {
+        setConfirmAction({
+            message: '確定要刪除這個目錄嗎？裡面的造型也會一併刪除喔！',
+            onConfirm: () => {
+                setSettingsData(prev => ({
+                    ...prev,
+                    catalogs: prev.catalogs.filter(c => c.id !== catId),
+                    activeGeneralCatalogs: prev.activeGeneralCatalogs.filter(id => id !== catId),
+                    activeVipCatalogs: prev.activeVipCatalogs.filter(id => id !== catId)
+                }));
+            }
+        });
+    };
+
+    const handleAddBalloonToCatalog = (catId) => {
+        const cat = settingsData.catalogs.find(c => c.id === catId);
+        const newBalloonId = cat.balloons.length > 0 ? Math.max(...cat.balloons.map(b => b.id)) + 1 : 1;
+        const newBalloon = { id: newBalloonId, name: '新造型', icon: '🎈', color: 'bg-gray-100 text-gray-600' };
+        
+        setSettingsData(prev => ({
+            ...prev,
+            catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: [...c.balloons, newBalloon] } : c)
+        }));
+        setEditingBalloon({ ...newBalloon, catId });
+    };
+
+    const handleUpdateBalloonInCatalog = (updatedBalloon) => {
+        setSettingsData(prev => ({
+            ...prev,
+            catalogs: prev.catalogs.map(c => c.id === updatedBalloon.catId ? {
+                ...c,
+                balloons: c.balloons.map(b => b.id === updatedBalloon.id ? updatedBalloon : b)
+            } : c)
+        }));
+        setEditingBalloon(null);
+    };
+
+    const handleDeleteBalloonFromCatalog = (balloonId, catId) => {
+        setConfirmAction({
+            message: '確定要刪除這個造型嗎？',
+            onConfirm: () => {
+                setSettingsData(prev => ({
+                    ...prev,
+                    catalogs: prev.catalogs.map(c => c.id === catId ? {
+                        ...c,
+                        balloons: c.balloons.filter(b => b.id !== balloonId)
+                    } : c)
+                }));
+                setEditingBalloon(null);
+            }
+        });
     };
 
     return (
@@ -1279,13 +1320,12 @@ export default function App() {
           <div className="space-y-6">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">外觀與基本設定</h3>
               
-              {/* 🌟 密碼鎖設定 */}
               <div className="bg-red-50 p-4 rounded-xl border border-red-100 mb-4">
                 <label className="block text-sm font-bold text-red-700 mb-2 flex items-center gap-2"><Lock size={16}/> 管理員後台密碼 (PIN碼)</label>
                 <input 
                   type="text" 
-                  value={formData.adminPin}
-                  onChange={(e) => setFormData({...formData, adminPin: e.target.value})}
+                  value={settingsData.adminPin}
+                  onChange={(e) => setSettingsData({...settingsData, adminPin: e.target.value})}
                   className="w-full max-w-xs border-2 border-red-200 rounded-xl px-4 py-3 focus:outline-none focus:border-red-500 font-black text-red-900 tracking-widest text-lg"
                   placeholder="例如：8888"
                 />
@@ -1296,8 +1336,8 @@ export default function App() {
                 <label className="block text-sm font-bold text-gray-700 mb-2">APP 標題名稱</label>
                 <input 
                   type="text" 
-                  value={formData.title}
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  value={settingsData.title}
+                  onChange={(e) => setSettingsData({...settingsData, title: e.target.value})}
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-bold text-gray-800"
                 />
               </div>
@@ -1306,32 +1346,42 @@ export default function App() {
                 <label className="block text-sm font-bold text-gray-700 mb-2">前台背景 (圖片網址 或 色碼)</label>
                 <input 
                   type="text" 
-                  value={formData.bgStyle}
-                  onChange={(e) => setFormData({...formData, bgStyle: e.target.value})}
+                  value={settingsData.bgStyle}
+                  onChange={(e) => setSettingsData({...settingsData, bgStyle: e.target.value})}
                   placeholder="例如：貼上雲端照片網址，或輸入 #fdf2f8"
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-gray-800"
                 />
-                <p className="text-xs text-gray-400 mt-1">留空將使用預設的粉色背景。支援 Google Drive 圖片連結。</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">查詢進度頁面宣傳圖 (圖片網址)</label>
+                <input 
+                  type="text" 
+                  value={settingsData.trackerImageUrl || ''}
+                  onChange={(e) => setSettingsData({...settingsData, trackerImageUrl: e.target.value})}
+                  placeholder="請貼上宣傳圖的 Google Drive 連結"
+                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-gray-800"
+                />
+                <p className="text-xs text-gray-400 mt-1">顯示在客人查詢進度時的造型名稱下方。建議尺寸：寬度 800px，高度可依需求（推薦 800x600 或正方形 800x800）。</p>
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">置頂 QR Code (圖片網址)</label>
                 <input 
                   type="text" 
-                  value={formData.qrCodeUrl}
-                  onChange={(e) => setFormData({...formData, qrCodeUrl: e.target.value})}
+                  value={settingsData.qrCodeUrl}
+                  onChange={(e) => setSettingsData({...settingsData, qrCodeUrl: e.target.value})}
                   placeholder="請貼上您的 QR Code 圖片網址"
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-gray-800"
                 />
-                <p className="text-xs text-gray-400 mt-1">設定後，QR Code 會永遠顯示在客人畫面的右下角。</p>
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">點單成功時的載入訊息</label>
                 <input 
                   type="text" 
-                  value={formData.loadingMessage}
-                  onChange={(e) => setFormData({...formData, loadingMessage: e.target.value})}
+                  value={settingsData.loadingMessage}
+                  onChange={(e) => setSettingsData({...settingsData, loadingMessage: e.target.value})}
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-bold text-gray-800"
                 />
               </div>
@@ -1345,23 +1395,34 @@ export default function App() {
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">訂單等待人數上限</label>
                     <div className="flex items-center gap-4 bg-gray-50 p-2 rounded-xl border border-gray-200">
-                      <button onClick={() => setFormData({...formData, maxWaitCount: Math.max(1, formData.maxWaitCount - 1)})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">-</button>
+                      <button onClick={() => setSettingsData({...settingsData, maxWaitCount: Math.max(1, settingsData.maxWaitCount - 1)})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">-</button>
                       <input 
                         type="number" 
-                        value={formData.maxWaitCount}
-                        onChange={(e) => setFormData({...formData, maxWaitCount: Math.max(1, parseInt(e.target.value) || 1)})}
+                        value={settingsData.maxWaitCount}
+                        onChange={(e) => setSettingsData({...settingsData, maxWaitCount: Math.max(1, parseInt(e.target.value) || 1)})}
                         className="flex-1 text-center font-black text-3xl text-gray-800 bg-transparent outline-none w-full"
                       />
-                      <button onClick={() => setFormData({...formData, maxWaitCount: formData.maxWaitCount + 1})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">+</button>
+                      <button onClick={() => setSettingsData({...settingsData, maxWaitCount: settingsData.maxWaitCount + 1})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">+</button>
+                    </div>
+                  </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">🎈一般造型平均製作時間</label>
+                    <div className="flex items-center gap-4 bg-gray-50 p-2 rounded-xl border border-gray-200">
+                      <button onClick={() => setSettingsData({...settingsData, timePerItem: Math.max(1, settingsData.timePerItem - 1)})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">-</button>
+                      <div className="flex-1 text-center font-black text-3xl text-gray-800">{settingsData.timePerItem} <span className="text-sm font-normal text-gray-500">分</span></div>
+                      <button onClick={() => setSettingsData({...settingsData, timePerItem: settingsData.timePerItem + 1})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">+</button>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">每個造型平均製作時間</label>
-                    <div className="flex items-center gap-4 bg-gray-50 p-2 rounded-xl border border-gray-200">
-                      <button onClick={() => setFormData({...formData, timePerItem: Math.max(1, formData.timePerItem - 1)})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">-</button>
-                      <div className="flex-1 text-center font-black text-3xl text-gray-800">{formData.timePerItem} <span className="text-sm font-normal text-gray-500">分</span></div>
-                      <button onClick={() => setFormData({...formData, timePerItem: formData.timePerItem + 1})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-indigo-500 text-xl">+</button>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">👑VIP造型平均製作時間</label>
+                    <div className="flex items-center gap-4 bg-yellow-50 p-2 rounded-xl border border-yellow-200">
+                      <button onClick={() => setSettingsData({...settingsData, vipTimePerItem: Math.max(1, (settingsData.vipTimePerItem||5) - 1)})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-yellow-600 text-xl">-</button>
+                      <div className="flex-1 text-center font-black text-3xl text-gray-800">{settingsData.vipTimePerItem || 5} <span className="text-sm font-normal text-gray-500">分</span></div>
+                      <button onClick={() => setSettingsData({...settingsData, vipTimePerItem: (settingsData.vipTimePerItem||5) + 1})} className="w-12 h-12 bg-white rounded-lg shadow-sm font-bold text-yellow-600 text-xl">+</button>
                     </div>
                   </div>
               </div>
@@ -1369,143 +1430,178 @@ export default function App() {
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">滿單(暫停接單)時的提示文字</label>
                 <textarea 
-                  value={formData.fullOrderMessage}
-                  onChange={(e) => setFormData({...formData, fullOrderMessage: e.target.value})}
+                  value={settingsData.fullOrderMessage}
+                  onChange={(e) => setSettingsData({...settingsData, fullOrderMessage: e.target.value})}
                   className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-medium text-gray-700 resize-none h-24"
                 />
               </div>
           </div>
 
-          {/* 一般造型區塊設定 */}
+          {/* 🌟 選單顯示指派區塊 */}
           <div className="space-y-6 pt-6 border-t">
-              <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">一般造型區塊設定</h3>
-              <div className="grid sm:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">前台顯示造型格數</label>
-                    <input 
-                      type="number" 
-                      value={formData.gridSize}
-                      onChange={(e) => setFormData({...formData, gridSize: Math.max(1, parseInt(e.target.value) || 1)})}
-                      className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-bold text-xl"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">照片顯示大小</label>
-                    <select 
-                        value={formData.thumbnailSize}
-                        onChange={(e) => setFormData({...formData, thumbnailSize: e.target.value})}
-                        className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 font-bold text-lg"
-                    >
-                        <option value="sm">小 (Small)</option>
-                        <option value="md">中 (Medium)</option>
-                        <option value="lg">大 (Large)</option>
-                        <option value="xl">特大 (Extra Large)</option>
-                    </select>
-                  </div>
-              </div>
-          </div>
-
-          {/* VIP 造型區塊設定 */}
-          <div className="space-y-6 pt-6 border-t">
-              <div className="flex items-center justify-between border-b pb-2">
-                  <h3 className="font-bold text-amber-600 text-lg flex items-center gap-2"><Crown size={20}/> VIP 造型區塊設定</h3>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                      <input type="checkbox" className="sr-only peer" checked={formData.showVipSection} onChange={(e) => setFormData({...formData, showVipSection: e.target.checked})} />
-                      <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-yellow-400"></div>
-                      <span className="ml-3 text-sm font-bold text-gray-700">{formData.showVipSection ? '在前台顯示' : '隱藏'}</span>
-                  </label>
-              </div>
+              <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">前台選單顯示設定 (打勾決定要在前台展示的選單)</h3>
               
-              {formData.showVipSection && (
-                  <div className="grid sm:grid-cols-2 gap-6 animate-in fade-in">
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">前台顯示 VIP 格數</label>
-                        <input 
-                          type="number" 
-                          value={formData.vipGridSize}
-                          onChange={(e) => setFormData({...formData, vipGridSize: Math.max(1, parseInt(e.target.value) || 1)})}
-                          className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-yellow-500 font-bold text-xl"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">VIP 照片顯示大小</label>
-                        <select 
-                            value={formData.vipThumbnailSize}
-                            onChange={(e) => setFormData({...formData, vipThumbnailSize: e.target.value})}
-                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-yellow-500 font-bold text-lg"
-                        >
-                            <option value="sm">小 (Small)</option>
-                            <option value="md">中 (Medium)</option>
-                            <option value="lg">大 (Large)</option>
-                            <option value="xl">特大 (Extra Large)</option>
-                        </select>
-                      </div>
+              <div className="grid sm:grid-cols-2 gap-8">
+                  {/* 一般區塊設定 */}
+                  <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+                    <h4 className="font-bold text-indigo-700 mb-3 flex items-center gap-2"><ImageIcon size={18}/> 一般區塊顯示內容</h4>
+                    <div className="space-y-2 mb-4 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-indigo-50">
+                        {settingsData.catalogs.map(cat => (
+                            <label key={`gen-${cat.id}`} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                                <input type="checkbox" className="w-5 h-5 accent-indigo-500 rounded" 
+                                    checked={settingsData.activeGeneralCatalogs.includes(cat.id)}
+                                    onChange={(e) => {
+                                        const newActive = e.target.checked 
+                                            ? [...settingsData.activeGeneralCatalogs, cat.id] 
+                                            : settingsData.activeGeneralCatalogs.filter(id => id !== cat.id);
+                                        setSettingsData({...settingsData, activeGeneralCatalogs: newActive});
+                                    }} 
+                                />
+                                <span className="font-bold text-gray-700">{cat.name} <span className="text-xs text-gray-400">({cat.balloons.length})</span></span>
+                            </label>
+                        ))}
+                    </div>
+                    <div className="flex gap-4">
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-gray-500 mb-1">顯示格數</label>
+                            <input type="number" value={settingsData.gridSize} onChange={(e) => setSettingsData({...settingsData, gridSize: Math.max(1, parseInt(e.target.value) || 1)})} className="w-full border-2 border-white rounded-lg px-3 py-2 text-center font-bold" />
+                        </div>
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-gray-500 mb-1">圖片大小</label>
+                            <select value={settingsData.thumbnailSize} onChange={(e) => setSettingsData({...settingsData, thumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm">
+                                <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
+                            </select>
+                        </div>
+                    </div>
                   </div>
-              )}
+
+                  {/* VIP區塊設定 */}
+                  <div className="bg-yellow-50/50 p-4 rounded-2xl border border-yellow-200">
+                    <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-bold text-yellow-700 flex items-center gap-2"><Crown size={18}/> VIP 區塊顯示內容</h4>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" className="sr-only peer" checked={settingsData.showVipSection} onChange={(e) => setSettingsData({...settingsData, showVipSection: e.target.checked})} />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-400"></div>
+                        </label>
+                    </div>
+                    <div className={`transition-all ${!settingsData.showVipSection ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <div className="space-y-2 mb-4 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-yellow-50">
+                            {settingsData.catalogs.map(cat => (
+                                <label key={`vip-${cat.id}`} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
+                                    <input type="checkbox" className="w-5 h-5 accent-yellow-500 rounded" 
+                                        checked={settingsData.activeVipCatalogs.includes(cat.id)}
+                                        onChange={(e) => {
+                                            const newActive = e.target.checked 
+                                                ? [...settingsData.activeVipCatalogs, cat.id] 
+                                                : settingsData.activeVipCatalogs.filter(id => id !== cat.id);
+                                            setSettingsData({...settingsData, activeVipCatalogs: newActive});
+                                        }} 
+                                    />
+                                    <span className="font-bold text-gray-700">{cat.name} <span className="text-xs text-gray-400">({cat.balloons.length})</span></span>
+                                </label>
+                            ))}
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-500 mb-1">顯示格數</label>
+                                <input type="number" value={settingsData.vipGridSize} onChange={(e) => setSettingsData({...settingsData, vipGridSize: Math.max(1, parseInt(e.target.value) || 1)})} className="w-full border-2 border-white rounded-lg px-3 py-2 text-center font-bold" />
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-xs font-bold text-gray-500 mb-1">圖片大小</label>
+                                <select value={settingsData.vipThumbnailSize} onChange={(e) => setSettingsData({...settingsData, vipThumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm">
+                                    <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                  </div>
+              </div>
           </div>
         </div>
 
-        {/* 氣球造型目錄管理 */}
-        <div className="space-y-6">
-            {/* 一般造型管理 */}
-            <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <label className="block text-lg font-black text-gray-800">🎈 一般造型目錄</label>
-                    <button onClick={() => handleAddBalloon(false)} className="flex items-center gap-1 text-sm bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-100 font-bold transition-colors">
-                    <Plus size={16} /> 新增造型
+        {/* 🌟 氣球造型目錄管理 */}
+        <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 mb-24">
+            <div className="flex items-center justify-between mb-6 border-b pb-4">
+                <label className="block text-xl font-black text-gray-800 flex items-center gap-2"><FolderOpen size={24} className="text-indigo-500"/> 造型目錄與選單管理</label>
+                {!editingCatalogId && (
+                    <button onClick={handleAddCatalog} className="flex items-center gap-1 text-sm bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-100 font-bold transition-colors">
+                        <Plus size={16} /> 新增目錄
                     </button>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                    {formData.balloons.map(balloon => (
-                    <button
-                        key={balloon.id}
-                        onClick={() => setEditingBalloon({...balloon, isVipList: false})}
-                        className="relative group flex flex-col items-center bg-gray-50 rounded-xl p-2 border-2 border-transparent hover:border-indigo-300 transition-all shadow-sm"
-                    >
-                        <div className="absolute top-1 right-1 bg-white p-1 rounded-full shadow opacity-0 group-hover:opacity-100 text-indigo-500"><Pencil size={12} /></div>
-                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-200') : ''}`}>
-                            {isImageUrl(balloon.icon) ? <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" /> : balloon.icon}
-                        </div>
-                        <span className="font-medium text-gray-600 text-xs truncate w-full text-center">{balloon.name}</span>
-                    </button>
-                    ))}
-                </div>
+                )}
             </div>
 
-            {/* VIP 造型管理 */}
-            <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-3xl shadow-sm border border-yellow-200 p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <label className="block text-lg font-black text-amber-800 flex items-center gap-2"><Crown size={24}/> VIP 專屬造型目錄</label>
-                    <button onClick={() => handleAddBalloon(true)} className="flex items-center gap-1 text-sm bg-white text-amber-600 px-4 py-2 rounded-xl hover:bg-yellow-100 font-bold transition-colors shadow-sm">
-                    <Plus size={16} /> 新增 VIP 造型
-                    </button>
-                </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                    {formData.vipBalloons.map(balloon => (
-                    <button
-                        key={balloon.id}
-                        onClick={() => setEditingBalloon({...balloon, isVipList: true})}
-                        className="relative group flex flex-col items-center bg-white/60 backdrop-blur-sm rounded-xl p-2 border-2 border-transparent hover:border-yellow-400 transition-all shadow-sm"
-                    >
-                        <div className="absolute top-1 right-1 bg-white p-1 rounded-full shadow opacity-0 group-hover:opacity-100 text-yellow-600"><Pencil size={12} /></div>
-                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
-                            {isImageUrl(balloon.icon) ? <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" /> : balloon.icon}
+            {!editingCatalogId ? (
+                // 顯示所有目錄
+                <div className="grid sm:grid-cols-2 gap-4">
+                    {settingsData.catalogs.map(cat => (
+                        <div key={cat.id} className="bg-gray-50 p-4 rounded-2xl border border-gray-200 hover:border-indigo-300 transition-colors">
+                            <input 
+                                type="text"
+                                value={cat.name}
+                                onChange={(e) => {
+                                    setSettingsData(prev => ({
+                                        ...prev,
+                                        catalogs: prev.catalogs.map(c => c.id === cat.id ? { ...c, name: e.target.value } : c)
+                                    }));
+                                }}
+                                className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 font-bold text-gray-800 mb-4 focus:outline-none focus:border-indigo-500"
+                            />
+                            <div className="flex items-center justify-between">
+                                <span className="text-sm font-bold text-gray-500 bg-white px-3 py-1 rounded-lg border border-gray-100 shadow-sm">
+                                    內含 {cat.balloons.length} 個造型
+                                </span>
+                                <div className="flex gap-2">
+                                    <button onClick={() => handleDeleteCatalog(cat.id)} className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18}/></button>
+                                    <button onClick={() => setEditingCatalogId(cat.id)} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold shadow-sm transition-colors text-sm flex items-center gap-1"><Pencil size={14}/> 編輯內容</button>
+                                </div>
+                            </div>
                         </div>
-                        <span className="font-bold text-amber-900 text-xs truncate w-full text-center">{balloon.name}</span>
-                    </button>
                     ))}
-                    {formData.vipBalloons.length === 0 && <p className="col-span-full text-center text-amber-600/50 py-4 font-medium">目前沒有 VIP 專屬造型，請點擊上方按鈕新增。</p>}
                 </div>
-            </div>
+            ) : (
+                // 顯示單一目錄內的造型
+                <div className="animate-in fade-in slide-in-from-right-4">
+                    <div className="flex items-center justify-between mb-6 bg-indigo-50 p-4 rounded-xl">
+                        <div>
+                            <p className="text-xs font-bold text-indigo-500 mb-1">正在編輯目錄內容</p>
+                            <h4 className="font-black text-xl text-indigo-900">{settingsData.catalogs.find(c => c.id === editingCatalogId)?.name}</h4>
+                        </div>
+                        <div className="flex gap-3">
+                            <button onClick={() => setEditingCatalogId(null)} className="px-4 py-2 bg-white text-indigo-600 font-bold rounded-xl shadow-sm hover:bg-indigo-100">返回清單</button>
+                            <button onClick={() => handleAddBalloonToCatalog(editingCatalogId)} className="flex items-center gap-1 text-sm bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 font-bold shadow-md">
+                                <Plus size={16} /> 新增造型
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                        {settingsData.catalogs.find(c => c.id === editingCatalogId)?.balloons.map(balloon => (
+                            <button
+                                key={balloon.id}
+                                onClick={() => setEditingBalloon({...balloon, catId: editingCatalogId})}
+                                className="relative group flex flex-col items-center bg-gray-50 rounded-xl p-2 border-2 border-transparent hover:border-indigo-300 transition-all shadow-sm"
+                            >
+                                <div className="absolute top-1 right-1 bg-white p-1 rounded-full shadow opacity-0 group-hover:opacity-100 text-indigo-500"><Pencil size={12} /></div>
+                                <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-200') : ''}`}>
+                                    {isImageUrl(balloon.icon) ? <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" /> : balloon.icon}
+                                </div>
+                                <span className="font-medium text-gray-600 text-xs truncate w-full text-center">{balloon.name}</span>
+                            </button>
+                        ))}
+                        {settingsData.catalogs.find(c => c.id === editingCatalogId)?.balloons.length === 0 && (
+                            <div className="col-span-full py-8 text-center text-gray-400 font-bold">這個目錄還是空的，快點擊右上角新增造型吧！</div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
 
         {/* 編輯氣球 Modal */}
         {editingBalloon && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-              <h3 className={`text-xl font-black mb-6 flex items-center gap-2 ${editingBalloon.isVipList ? 'text-amber-600' : 'text-gray-800'}`}>
-                  {editingBalloon.isVipList ? <Crown size={24}/> : <ImageIcon size={24}/>} 
-                  編輯{editingBalloon.isVipList ? ' VIP ' : ' '}氣球造型
+              <h3 className="text-xl font-black mb-6 flex items-center gap-2 text-indigo-700">
+                  <ImageIcon size={24}/> 編輯氣球造型
               </h3>
               
               <div className="space-y-4 mb-8">
@@ -1515,7 +1611,7 @@ export default function App() {
                     type="text" 
                     value={editingBalloon.name}
                     onChange={e => setEditingBalloon({...editingBalloon, name: e.target.value})}
-                    className={`w-full border-2 rounded-xl px-4 py-3 focus:outline-none font-bold ${editingBalloon.isVipList ? 'focus:border-yellow-500 border-yellow-100 bg-yellow-50/30' : 'focus:border-indigo-500 border-gray-200'}`}
+                    className="w-full border-2 rounded-xl px-4 py-3 focus:outline-none font-bold focus:border-indigo-500 border-gray-200"
                   />
                 </div>
                 <div>
@@ -1524,7 +1620,7 @@ export default function App() {
                     type="text" 
                     value={editingBalloon.icon}
                     onChange={e => setEditingBalloon({...editingBalloon, icon: e.target.value})}
-                    className={`w-full border-2 rounded-xl px-4 py-3 focus:outline-none font-medium ${editingBalloon.isVipList ? 'focus:border-yellow-500 border-yellow-100 bg-yellow-50/30' : 'focus:border-indigo-500 border-gray-200'}`}
+                    className="w-full border-2 rounded-xl px-4 py-3 focus:outline-none font-medium focus:border-indigo-500 border-gray-200"
                   />
                   <p className="text-[11px] text-gray-400 mt-1">支援貼上 Google Drive 分享連結。</p>
                 </div>
@@ -1542,13 +1638,13 @@ export default function App() {
               </div>
 
               <div className="flex gap-2">
-                <button onClick={() => handleDeleteBalloon(editingBalloon.id, editingBalloon.isVipList)} className="p-4 rounded-xl font-bold text-red-500 bg-red-50 hover:bg-red-100 transition-colors" title="刪除">
+                <button onClick={() => handleDeleteBalloonFromCatalog(editingBalloon.id, editingBalloon.catId)} className="p-4 rounded-xl font-bold text-red-500 bg-red-50 hover:bg-red-100 transition-colors" title="刪除">
                   <Trash2 size={24} />
                 </button>
                 <button onClick={() => setEditingBalloon(null)} className="flex-1 py-4 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-lg">
                   取消
                 </button>
-                <button onClick={() => handleUpdateBalloon(editingBalloon)} className={`flex-1 py-4 px-4 rounded-xl font-bold text-white shadow-lg transition-colors text-lg ${editingBalloon.isVipList ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30' : 'bg-indigo-500 hover:bg-indigo-600 shadow-indigo-500/30'}`}>
+                <button onClick={() => handleUpdateBalloonInCatalog(editingBalloon)} className="flex-1 py-4 px-4 rounded-xl font-bold text-white shadow-lg transition-colors text-lg bg-indigo-500 hover:bg-indigo-600 shadow-indigo-500/30">
                   確定儲存
                 </button>
               </div>
@@ -1560,7 +1656,7 @@ export default function App() {
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-gray-100 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] z-40">
           <div className="max-w-3xl mx-auto">
             <button
-              onClick={() => handleSaveConfig(formData)}
+              onClick={handleSaveConfig}
               className="w-full py-4 bg-gray-900 hover:bg-black text-white font-black rounded-xl shadow-2xl shadow-gray-900/20 transition-all active:scale-[0.98] text-lg flex justify-center items-center gap-2"
             >
               <CheckCircle2 size={24} /> 儲存所有設定並返回
@@ -1608,10 +1704,10 @@ export default function App() {
 
       {/* Main Content */}
       <main className={`max-w-5xl mx-auto ${view === 'tracker' ? 'p-0' : 'px-4 py-6'}`}>
-        {view === 'guest' && <GuestView />}
-        {view === 'admin' && <AdminView />}
-        {view === 'settings' && <SettingsView />}
-        {view === 'tracker' && <TrackerView />}
+        {view === 'guest' && renderGuestView()}
+        {view === 'admin' && renderAdminView()}
+        {view === 'settings' && renderSettingsView()}
+        {view === 'tracker' && renderTrackerView()}
       </main>
       
       {/* 🌟 全域客製化提示對話框 (Alert Modal) */}
