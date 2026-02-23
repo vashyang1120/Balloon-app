@@ -336,6 +336,7 @@ export default function App() {
     return { background: config.bgStyle };
   }, [config.bgStyle]);
 
+  // --- API 與事件處理 ---
   const callGeminiAPI = async (prompt, isJson = false) => {
     const apiKey = ""; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -658,6 +659,7 @@ export default function App() {
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
                         
+                        {/* 宣傳圖片 */}
                         {config.trackerImageUrl && (
                             <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                                 <img 
@@ -731,6 +733,7 @@ export default function App() {
   const renderGuestView = () => (
     <div className="pb-8 relative">
       
+      {/* 👑 VIP 模式橫幅 */}
       {config.vipModeActive && (
           <div className="bg-gradient-to-r from-amber-400 to-yellow-500 text-white font-bold py-3 px-4 rounded-2xl mb-4 shadow-lg flex items-center justify-center gap-2 animate-pulse">
               <Crown size={24} />
@@ -1659,7 +1662,7 @@ export default function App() {
                     ))}
                 </div>
             ) : (
-                // 🌟 顯示單一目錄內的造型 (加入數量設定器)
+                // 顯示單一目錄內的造型 (加入數量設定器)
                 <div className="animate-in fade-in slide-in-from-right-4">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                         <div>
