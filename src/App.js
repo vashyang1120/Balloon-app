@@ -281,22 +281,26 @@ export default function App() {
     return combined.slice(0, config.vipGridSize);
   }, [config.activeVipCatalogs, config.catalogs, config.vipGridSize]);
 
-  // 🌟 用於階段 1：讓客人選擇他原本預訂的造型 (包含所有啟用的目錄，確保他一定能找到他原本選的)
+  // 🌟 用於階段 1：讓客人選擇他原本預訂的造型 (嚴格排除名稱重疊避免誤判)
   const allActiveBalloons = useMemo(() => {
     const combined = [];
     const addBalloons = (catalogIds) => {
         (catalogIds || []).forEach(catId => {
             const cat = (config.catalogs || []).find(c => c.id === catId);
-            if (cat) {
-                cat.balloons.forEach(b => {
-                    if (!combined.find(existing => existing.id === b.id)) combined.push(b);
-                });
-            }
+            if (cat) combined.push(...cat.balloons);
         });
     };
     addBalloons(config.activeGeneralCatalogs);
     addBalloons(config.activeVipCatalogs);
-    return combined;
+    
+    // 解決ID衝突：只要 ID 和 名稱 不完全重複就保留
+    const unique = [];
+    combined.forEach(b => {
+        if (!unique.find(u => u.id === b.id && u.name === b.name)) {
+            unique.push(b);
+        }
+    });
+    return unique;
   }, [config.catalogs, config.activeGeneralCatalogs, config.activeVipCatalogs]);
 
   // 🌟 用於階段 2：讓客人選擇新的造型 (依照他是否為 VIP 來決定顯示範圍)
@@ -304,9 +308,11 @@ export default function App() {
     if (!verifiedOrderForChange) return [];
     const combined = [...displayBalloons]; // 一般客人都看得到一般顯示造型
     if (verifiedOrderForChange.isVip) {
-        // 如果原本是 VIP 訂單，則額外加入 VIP 造型讓他選
+        // 如果原本是 VIP 訂單，則額外加入 VIP 造型讓他選 (解決名稱衝突導致被吃掉的問題)
         displayVipBalloons.forEach(vb => {
-            if (!combined.find(b => b.id === vb.id)) combined.push(vb);
+            if (!combined.find(b => b.id === vb.id && b.name === vb.name)) {
+                combined.push(vb);
+            }
         });
     }
     return combined;
@@ -420,6 +426,8 @@ export default function App() {
       orderNumber: newOrderNumber,
       balloonId: balloon.id,
       balloonName: balloon.name,
+      icon: balloon.icon || '',   // 🌟 確保儲存圖示
+      color: balloon.color || '', // 🌟 確保儲存顏色
       status: 'pending',
       timestamp: Date.now(),
       userId: user.uid,
@@ -437,7 +445,7 @@ export default function App() {
       setSelectedBalloon(null);
       setAiReason('');
       
-      const initialSuccessOrder = { ...newOrder, icon: balloon.icon, story: config.loadingMessage, estimatedWaitTime: currentEstTime };
+      const initialSuccessOrder = { ...newOrder, story: config.loadingMessage, estimatedWaitTime: currentEstTime };
       setSuccessOrder(initialSuccessOrder);
 
       const storyPrompt = `顧客剛點了一個名為「${balloon.name}」的造型氣球。請以「氣球魔法師」的口吻，用繁體中文寫一段簡短（約2-3句話）的可愛魔法物語或保養小叮嚀給這位顧客。例如：「你的狗狗氣球被施了快樂魔法！請記得多給它愛的抱抱，並且遠離尖銳的仙人掌喔！✨」`;
@@ -530,6 +538,8 @@ export default function App() {
       await updateDoc(orderRef, { 
         balloonId: newSelectedBalloon.id,
         balloonName: newSelectedBalloon.name,
+        icon: newSelectedBalloon.icon || '', // 🌟 更新圖示
+        color: newSelectedBalloon.color || '' // 🌟 更新顏色
       });
 
       setIsChangeOrderModalOpen(false);
@@ -537,7 +547,7 @@ export default function App() {
       setNewSelectedBalloon(null);
       setChangeOrderNumber('');
       setChangeOriginalBalloonId('');
-      setAlertMessage('造型已成功為您更換為：' + newSelectedBalloon.name + '！🎈');
+      setAlertMessage(`造型已成功為您更換為：${newSelectedBalloon.name}！🎈`);
 
     } catch (error) {
       console.error("Error changing order:", error);
@@ -602,7 +612,7 @@ export default function App() {
                     <div className="flex flex-wrap justify-center gap-3 max-h-[60vh] overflow-y-auto p-2">
                         {selectableOrders.length > 0 ? selectableOrders.map(o => (
                             <button
-                                key={o.id}
+                                key={`track-${o.id}`}
                                 onClick={() => setTrackSelectedNum(o.orderNumber)}
                                 className={`w-16 h-16 rounded-2xl font-black text-2xl border-2 transition-all shadow-sm active:scale-95 ${
                                     o.status === 'completed' 
@@ -659,7 +669,6 @@ export default function App() {
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
                         
-                        {/* 宣傳圖片 */}
                         {config.trackerImageUrl && (
                             <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                                 <img 
@@ -692,7 +701,7 @@ export default function App() {
                         </h4>
                         
                         <div className="flex items-center gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                            <div className="w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden">
+                            <div className={`w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden ${!isImageUrl(trackedOrder.icon) ? (trackedOrder.color || 'bg-gray-100') : ''}`}>
                                 {isImageUrl(trackedOrder.icon) ? <img src={getDisplayImageUrl(trackedOrder.icon)} alt="icon" className="w-full h-full object-cover"/> : trackedOrder.icon}
                             </div>
                             <div>
@@ -733,7 +742,6 @@ export default function App() {
   const renderGuestView = () => (
     <div className="pb-8 relative">
       
-      {/* 👑 VIP 模式橫幅 */}
       {config.vipModeActive && (
           <div className="bg-gradient-to-r from-amber-400 to-yellow-500 text-white font-bold py-3 px-4 rounded-2xl mb-4 shadow-lg flex items-center justify-center gap-2 animate-pulse">
               <Crown size={24} />
@@ -854,7 +862,7 @@ export default function App() {
       <div className={`grid gap-3 sm:gap-4 ${getGridColsClasses(config.thumbnailSize)} ${isOrderFull ? 'opacity-60 grayscale-[50%]' : ''}`}>
         {displayBalloons.map(balloon => (
           <button
-            key={balloon.id}
+            key={`gen-${balloon.id}`}
             onClick={() => handleBalloonClick(balloon, false)}
             className={`group flex flex-col items-center bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent ${
                 isOrderFull ? 'cursor-not-allowed' : 'hover:shadow-md hover:border-pink-300 hover:bg-white active:scale-95'
@@ -877,8 +885,6 @@ export default function App() {
               <img src={getDisplayImageUrl(config.qrCodeUrl)} alt="QR Code" className="w-full h-full object-cover" />
           </div>
       )}
-
-      {/* --- Modals --- */}
 
       {/* 🌟 AI 魔法顧問 Modal */}
       {isAiModalOpen && (
@@ -920,7 +926,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟🌟🌟 確認點單 Modal 🌟🌟🌟 */}
+      {/* 確認點單 Modal */}
       {selectedBalloon && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
@@ -961,7 +967,7 @@ export default function App() {
         </div>
       )}
       
-      {/* 更改造型 Modal */}
+      {/* 🌟 更改造型 Modal */}
       {isChangeOrderModalOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl scale-in-center overflow-y-auto max-h-[90vh]">
@@ -984,7 +990,7 @@ export default function App() {
                             <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-1">
                                 {pendingOrders.slice(1).map(o => (
                                     <button 
-                                        key={o.id}
+                                        key={`co-${o.id}`}
                                         onClick={() => setChangeOrderNumber(o.orderNumber)}
                                         className={`w-14 h-14 rounded-xl font-black text-xl border-2 transition-all shadow-sm ${
                                             parseInt(changeOrderNumber) === o.orderNumber 
@@ -1011,8 +1017,8 @@ export default function App() {
                             className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 text-lg font-medium text-gray-700 bg-white"
                         >
                             <option value="">請選擇原本的造型...</option>
-                            {allActiveBalloons.map(b => (
-                                <option key={b.id} value={b.id}>{b.name}</option>
+                            {allActiveBalloons.map((b, idx) => (
+                                <option key={`opt-${b.id}-${idx}`} value={b.id}>{b.name}</option>
                             ))}
                         </select>
                     </div>
@@ -1046,9 +1052,9 @@ export default function App() {
 
                     <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">👇 請選擇新的造型</h4>
                     <div className="grid grid-cols-3 gap-3 mb-6 max-h-60 overflow-y-auto p-1">
-                        {allowedNewBalloons.map(balloon => (
+                        {allowedNewBalloons.map((balloon, idx) => (
                             <button
-                                key={balloon.id}
+                                key={`new-${balloon.id}-${idx}`}
                                 onClick={() => setNewSelectedBalloon(balloon)}
                                 className={`flex flex-col items-center p-2 rounded-xl border-2 transition-all ${
                                     newSelectedBalloon?.id === balloon.id 
@@ -1103,11 +1109,13 @@ export default function App() {
               <p className="text-6xl font-black text-pink-500 mb-4">#{successOrder.orderNumber}</p>
               
               <div className="flex items-center justify-center gap-2 text-gray-600 font-medium bg-white py-2 px-4 rounded-lg inline-flex shadow-sm">
-                {isImageUrl(successOrder.icon) ? (
-                  <img src={getDisplayImageUrl(successOrder.icon)} alt={successOrder.balloonName} className="w-6 h-6 object-cover rounded-md" />
-                ) : (
-                  <span className="text-2xl">{successOrder.icon}</span>
-                )}
+                <div className={`w-6 h-6 flex items-center justify-center rounded-md overflow-hidden ${!isImageUrl(successOrder.icon) ? (successOrder.color || 'bg-gray-100') : ''}`}>
+                    {isImageUrl(successOrder.icon) ? (
+                    <img src={getDisplayImageUrl(successOrder.icon)} alt={successOrder.balloonName} className="w-full h-full object-cover" />
+                    ) : (
+                    <span className="text-lg">{successOrder.icon}</span>
+                    )}
+                </div>
                 <span>{successOrder.balloonName}</span>
               </div>
             </div>
@@ -1290,7 +1298,7 @@ export default function App() {
 
     const handleAddBalloonToCatalog = (catId) => {
         const cat = settingsData.catalogs.find(c => c.id === catId);
-        const newBalloonId = cat.balloons.length > 0 ? Math.max(...cat.balloons.map(b => b.id)) + 1 : 1;
+        const newBalloonId = Date.now() + Math.floor(Math.random() * 10000);
         const newBalloon = { id: newBalloonId, name: '新造型', icon: '🎈', color: 'bg-gray-100 text-gray-600' };
         
         setSettingsData(prev => ({
@@ -1298,7 +1306,7 @@ export default function App() {
             catalogs: prev.catalogs.map(c => c.id === catId ? { ...c, balloons: [...c.balloons, newBalloon] } : c)
         }));
         setEditingBalloon({ ...newBalloon, catId });
-        setTempCatalogSize(prev => (parseInt(prev) || 0) + 1); // 🌟 同步更新數量
+        setTempCatalogSize(prev => (parseInt(prev) || 0) + 1);
     };
 
     const handleUpdateBalloonInCatalog = (updatedBalloon) => {
@@ -1324,12 +1332,11 @@ export default function App() {
                     } : c)
                 }));
                 setEditingBalloon(null);
-                setTempCatalogSize(prev => Math.max(0, (parseInt(prev) || 1) - 1)); // 🌟 同步更新數量
+                setTempCatalogSize(prev => Math.max(0, (parseInt(prev) || 1) - 1));
             }
         });
     };
 
-    // 🌟 一鍵清空指定目錄
     const handleClearCatalogBalloons = (catId) => {
         setConfirmAction({
             message: '確定要清空這個目錄裡「所有」的造型嗎？',
@@ -1343,7 +1350,6 @@ export default function App() {
         });
     };
 
-    // 🌟 快速設定目錄造型數量
     const handleSetCatalogSize = (catId, newSize) => {
         const cat = settingsData.catalogs.find(c => c.id === catId);
         const currentSize = cat.balloons.length;
@@ -1351,9 +1357,8 @@ export default function App() {
         if (newSize === currentSize) return;
 
         if (newSize > currentSize) {
-            // 自動補齊不足的數量
             const addedBalloons = Array.from({ length: newSize - currentSize }).map((_, i) => ({
-                id: (cat.balloons.length > 0 ? Math.max(...cat.balloons.map(b => b.id)) : 0) + i + 1,
+                id: Date.now() + i + Math.floor(Math.random() * 10000),
                 name: '新造型',
                 icon: '🎈',
                 color: 'bg-gray-100 text-gray-600'
@@ -1365,7 +1370,6 @@ export default function App() {
             setTempCatalogSize(newSize.toString());
             setAlertMessage(`成功！已為您自動新增 ${newSize - currentSize} 個新造型欄位，請點擊編輯設定圖片與名稱。`);
         } else {
-            // 縮減數量需再次確認
             setConfirmAction({
                 message: `確定要將數量縮減為 ${newSize} 個嗎？這將會刪除排在最後面的 ${currentSize - newSize} 個造型喔！`,
                 onConfirm: () => {
@@ -1376,7 +1380,7 @@ export default function App() {
                     setTempCatalogSize(newSize.toString());
                 },
                 onCancel: () => {
-                    setTempCatalogSize(currentSize.toString()); // 復原輸入框數字
+                    setTempCatalogSize(currentSize.toString());
                 }
             });
         }
@@ -1662,7 +1666,7 @@ export default function App() {
                     ))}
                 </div>
             ) : (
-                // 顯示單一目錄內的造型 (加入數量設定器)
+                // 顯示單一目錄內的造型
                 <div className="animate-in fade-in slide-in-from-right-4">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                         <div>
@@ -1671,7 +1675,6 @@ export default function App() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                             
-                            {/* 🌟 快速數量設定器 */}
                             <div className="flex items-center bg-white rounded-lg border border-indigo-200 shadow-sm overflow-hidden h-10">
                                 <span className="text-xs font-bold text-gray-500 px-3 bg-gray-50 h-full flex items-center border-r border-gray-100">總數量</span>
                                 <input 
@@ -1692,17 +1695,14 @@ export default function App() {
                                 </button>
                             </div>
                             
-                            {/* 清空按鈕 */}
                             <button onClick={() => handleClearCatalogBalloons(editingCatalogId)} className="h-10 px-3 bg-white text-red-500 rounded-lg shadow-sm hover:bg-red-50 border border-red-100 transition-colors flex items-center gap-1 font-bold text-sm" title="清空所有造型">
                                 <Trash2 size={16} /> <span className="hidden sm:inline">清空</span>
                             </button>
                             
-                            {/* 新增按鈕 */}
                             <button onClick={() => handleAddBalloonToCatalog(editingCatalogId)} className="h-10 px-3 bg-indigo-600 text-white rounded-lg shadow-sm hover:bg-indigo-700 transition-colors flex items-center gap-1 font-bold text-sm" title="新增一個">
                                 <Plus size={16} /> <span className="hidden sm:inline">新增</span>
                             </button>
                             
-                            {/* 返回按鈕 */}
                             <button onClick={() => { setEditingCatalogId(null); setTempCatalogSize(""); }} className="h-10 px-4 bg-white text-indigo-600 font-bold rounded-lg shadow-sm hover:bg-indigo-50 border border-indigo-100 transition-colors">
                                 完成返回
                             </button>
@@ -1712,7 +1712,7 @@ export default function App() {
                     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
                         {settingsData.catalogs.find(c => c.id === editingCatalogId)?.balloons.map(balloon => (
                             <button
-                                key={balloon.id}
+                                key={`edit-${balloon.id}`}
                                 onClick={() => setEditingBalloon({...balloon, catId: editingCatalogId})}
                                 className="relative group flex flex-col items-center bg-gray-50 rounded-xl p-2 border-2 border-transparent hover:border-indigo-300 transition-all shadow-sm"
                             >
