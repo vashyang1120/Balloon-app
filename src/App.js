@@ -136,6 +136,12 @@ export default function App() {
   const [selectedBalloon, setSelectedBalloon] = useState(null);
   const [successOrder, setSuccessOrder] = useState(null);
 
+  // Gemini AI 狀態
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiQuery, setAiQuery] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiReason, setAiReason] = useState('');
+
   // 更改造型狀態
   const [isChangeOrderModalOpen, setIsChangeOrderModalOpen] = useState(false);
   const [changeOrderNumber, setChangeOrderNumber] = useState('');
@@ -143,9 +149,6 @@ export default function App() {
   const [changeError, setChangeError] = useState('');
   const [verifiedOrderForChange, setVerifiedOrderForChange] = useState(null);
   const [newSelectedBalloon, setNewSelectedBalloon] = useState(null);
-
-  // 清空訂單狀態
-  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
 
   // 查詢進度狀態
   const [trackSelectedNum, setTrackSelectedNum] = useState(null);
@@ -361,6 +364,28 @@ export default function App() {
     }
   };
 
+  const handleAiRecommend = async () => {
+    if (!aiQuery.trim()) return;
+    setIsAiLoading(true);
+    const catalogInfo = displayBalloons.map(b => ({ id: b.id, name: b.name }));
+    const prompt = `你是一個熱情可愛的氣球魔法師。顧客說：「${aiQuery}」。請從以下氣球目錄中，挑選「一個」最適合的氣球推薦給他：\n${JSON.stringify(catalogInfo)}\n\n請以 JSON 格式回傳，包含 "id" (推薦的氣球ID數字) 與 "reason" (推薦理由，約20-30字內，語氣要非常活潑可愛，結尾加上emoji)。`;
+    
+    const result = await callGeminiAPI(prompt, true);
+    setIsAiLoading(false);
+    
+    if (result && result.id) {
+      const recommendedBalloon = displayBalloons.find(b => b.id === result.id);
+      if (recommendedBalloon) {
+        setIsAiModalOpen(false);
+        setAiReason(result.reason);
+        setSelectedBalloon(recommendedBalloon);
+        setAiQuery('');
+      } else {
+        setAiReason('哎呀！魔法師找不太到適合的，您可以自己挑選看看喔！✨');
+      }
+    }
+  };
+
   const handleBalloonClick = (balloon, isVipCategory = false) => {
     if (isVipCategory && !config.vipModeActive) {
       setAlertMessage("👑 這是 VIP 專屬造型！請先請氣球小V為您開啟 VIP 模式才能點選喔！");
@@ -415,6 +440,7 @@ export default function App() {
       }
 
       setSelectedBalloon(null);
+      setAiReason('');
       
       const initialSuccessOrder = { ...newOrder, story: config.loadingMessage, estimatedWaitTime: currentEstTime };
       setSuccessOrder(initialSuccessOrder);
@@ -453,22 +479,6 @@ export default function App() {
         }
       }
     });
-  };
-
-  const handleClearAllOrders = async () => {
-    if (!user) return;
-    try {
-      const promises = orders.map(order => 
-        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id))
-      );
-      await Promise.all(promises);
-      setIsClearConfirmOpen(false); 
-      setTrackSelectedNum(null);
-      setAlertMessage("🎉 所有訂單資料已成功清空！");
-    } catch (error) {
-      console.error("Error clearing all orders:", error);
-      setAlertMessage("清空失敗，請稍後再試。");
-    }
   };
 
   const handleVerifyOrderForChange = () => {
@@ -1173,7 +1183,12 @@ export default function App() {
 
       <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
         <button 
-          onClick={() => setIsClearConfirmOpen(true)}
+          onClick={() => {
+              setConfirmAction({
+                  message: '⚠️ 警告：這個操作將會刪除「所有待製作」與「已完成」的訂單資料，且無法復原！確定要清空嗎？',
+                  onConfirm: handleClearAllOrders
+              });
+          }}
           className="flex items-center gap-2 text-red-500 bg-red-50 hover:bg-red-500 hover:text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-sm active:scale-95 border border-red-100 hover:border-red-500"
         >
           <Trash2 size={20} /> 清空本次活動所有訂單資料
@@ -1770,7 +1785,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 全域客製化確認對話框 (Confirm Modal) - 加入 onCancel 處理 */}
+      {/* 🌟 全域客製化確認對話框 (Confirm Modal) */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
@@ -1806,35 +1821,6 @@ export default function App() {
                     <button onClick={handleAdminLogin} className="flex-1 py-3 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-md transition-colors">進入</button>
                 </div>
             </div>
-        </div>
-      )}
-
-      {/* 🌟 清空所有訂單確認 Modal (防呆機制) */}
-      {isClearConfirmOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-500 mb-4 shadow-inner">
-              <AlertCircle size={32} />
-            </div>
-            <h3 className="text-xl font-black text-center text-gray-800 mb-2">確定要清空所有訂單嗎？</h3>
-            <p className="text-center text-red-600 font-bold mb-6 text-sm bg-red-50 p-3 rounded-xl border border-red-100">
-              ⚠️ 警告：這個操作將會刪除「所有待製作」與「已完成」的訂單資料，且無法復原！
-            </p>
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setIsClearConfirmOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleClearAllOrders}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30 transition-colors"
-              >
-                確認清空
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
