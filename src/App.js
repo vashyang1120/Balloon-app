@@ -481,6 +481,22 @@ export default function App() {
     });
   };
 
+  // 🌟 清空訂單按鈕綁定的執行函式
+  const handleClearAllOrders = async () => {
+    if (!user) return;
+    try {
+      const promises = orders.map(order => 
+        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id))
+      );
+      await Promise.all(promises);
+      setTrackSelectedNum(null);
+      setAlertMessage("🎉 所有訂單資料已成功清空！");
+    } catch (error) {
+      console.error("Error clearing all orders:", error);
+      setAlertMessage("清空失敗，請稍後再試。");
+    }
+  };
+
   const handleVerifyOrderForChange = () => {
     setChangeError('');
     const targetOrderNum = parseInt(changeOrderNumber);
@@ -519,8 +535,8 @@ export default function App() {
       await updateDoc(orderRef, { 
         balloonId: newSelectedBalloon.id,
         balloonName: newSelectedBalloon.name,
-        icon: newSelectedBalloon.icon || '', // 🌟 更新圖示
-        color: newSelectedBalloon.color || '' // 🌟 更新顏色
+        icon: newSelectedBalloon.icon || '', 
+        color: newSelectedBalloon.color || '' 
       });
 
       setIsChangeOrderModalOpen(false);
@@ -1181,6 +1197,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* 🌟 按鈕已改為呼叫全域 setConfirmAction */}
       <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
         <button 
           onClick={() => {
@@ -1785,7 +1802,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 全域客製化確認對話框 (Confirm Modal) */}
+      {/* 🌟 全域客製化確認對話框 (Confirm Modal) - 加入 onCancel 處理 */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
