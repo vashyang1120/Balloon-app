@@ -17,7 +17,7 @@ import {
   updateDoc,
   deleteDoc
 } from 'firebase/firestore';
-import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info, FolderOpen, ExternalLink } from 'lucide-react';
+import { Clock, Users, Settings as SettingsIcon, CheckCircle2, ChevronLeft, Check, X, PartyPopper, Pencil, Plus, Trash2, Sparkles, Wand2, Loader2, Maximize, Minimize, Edit3, AlertCircle, Crown, Image as ImageIcon, Lock, Search, Info, FolderOpen, ExternalLink, ArrowUp, ArrowDown } from 'lucide-react';
 
 // --- 預設 36 個氣球造型資料 ---
 const DEFAULT_BALLOONS = [
@@ -106,7 +106,6 @@ export default function App() {
   
   // 系統設定狀態
   const [config, setConfig] = useState({ 
-    gridSize: 24, 
     timePerItem: 3, 
     vipTimePerItem: 5, 
     title: '歡樂氣球工坊', 
@@ -115,7 +114,6 @@ export default function App() {
     maxWaitCount: 20,
     fullOrderMessage: '很抱歉，因為活動時間有限，目前的氣球訂單已經滿載囉！期待下次再為您服務！🎈',
     showVipSection: false,
-    vipGridSize: 12,
     vipThumbnailSize: 'md',
     bgStyle: '',
     qrCodeUrl: '',
@@ -136,12 +134,6 @@ export default function App() {
   const [selectedBalloon, setSelectedBalloon] = useState(null);
   const [successOrder, setSuccessOrder] = useState(null);
 
-  // Gemini AI 狀態
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiReason, setAiReason] = useState('');
-
   // 更改造型狀態
   const [isChangeOrderModalOpen, setIsChangeOrderModalOpen] = useState(false);
   const [changeOrderNumber, setChangeOrderNumber] = useState('');
@@ -149,6 +141,9 @@ export default function App() {
   const [changeError, setChangeError] = useState('');
   const [verifiedOrderForChange, setVerifiedOrderForChange] = useState(null);
   const [newSelectedBalloon, setNewSelectedBalloon] = useState(null);
+
+  // 清空訂單狀態
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
 
   // 查詢進度狀態
   const [trackSelectedNum, setTrackSelectedNum] = useState(null);
@@ -259,15 +254,15 @@ export default function App() {
   const estimatedWaitTime = getWaitTimeForQueue(pendingOrders);
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
-  // --- 目錄轉換顯示邏輯 ---
+  // --- 目錄轉換顯示邏輯 (移除切斷限制，顯示所有勾選內容) ---
   const displayBalloons = useMemo(() => {
     const combined = [];
     (config.activeGeneralCatalogs || []).forEach(catId => {
         const cat = (config.catalogs || []).find(c => c.id === catId);
         if (cat) combined.push(...cat.balloons);
     });
-    return combined.slice(0, config.gridSize);
-  }, [config.activeGeneralCatalogs, config.catalogs, config.gridSize]);
+    return combined; // 不再使用 slice 截斷
+  }, [config.activeGeneralCatalogs, config.catalogs]);
 
   const displayVipBalloons = useMemo(() => {
     const combined = [];
@@ -275,8 +270,8 @@ export default function App() {
         const cat = (config.catalogs || []).find(c => c.id === catId);
         if (cat) combined.push(...cat.balloons);
     });
-    return combined.slice(0, config.vipGridSize);
-  }, [config.activeVipCatalogs, config.catalogs, config.vipGridSize]);
+    return combined; // 不再使用 slice 截斷
+  }, [config.activeVipCatalogs, config.catalogs]);
 
   // 🌟 用於階段 1：讓客人選擇他原本預訂的造型 (嚴格排除名稱重疊避免誤判)
   const allActiveBalloons = useMemo(() => {
@@ -360,28 +355,6 @@ export default function App() {
       } catch (err) {
         if (i === 4) return null;
         await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
-      }
-    }
-  };
-
-  const handleAiRecommend = async () => {
-    if (!aiQuery.trim()) return;
-    setIsAiLoading(true);
-    const catalogInfo = displayBalloons.map(b => ({ id: b.id, name: b.name }));
-    const prompt = `你是一個熱情可愛的氣球魔法師。顧客說：「${aiQuery}」。請從以下氣球目錄中，挑選「一個」最適合的氣球推薦給他：\n${JSON.stringify(catalogInfo)}\n\n請以 JSON 格式回傳，包含 "id" (推薦的氣球ID數字) 與 "reason" (推薦理由，約20-30字內，語氣要非常活潑可愛，結尾加上emoji)。`;
-    
-    const result = await callGeminiAPI(prompt, true);
-    setIsAiLoading(false);
-    
-    if (result && result.id) {
-      const recommendedBalloon = displayBalloons.find(b => b.id === result.id);
-      if (recommendedBalloon) {
-        setIsAiModalOpen(false);
-        setAiReason(result.reason);
-        setSelectedBalloon(recommendedBalloon);
-        setAiQuery('');
-      } else {
-        setAiReason('哎呀！魔法師找不太到適合的，您可以自己挑選看看喔！✨');
       }
     }
   };
@@ -489,6 +462,7 @@ export default function App() {
         deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id))
       );
       await Promise.all(promises);
+      setIsClearConfirmOpen(false); 
       setTrackSelectedNum(null);
       setAlertMessage("🎉 所有訂單資料已成功清空！");
     } catch (error) {
@@ -1197,7 +1171,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* 🌟 按鈕已改為呼叫全域 setConfirmAction */}
       <div className="mt-12 pt-6 border-t border-gray-200 flex justify-center pb-4">
         <button 
           onClick={() => {
@@ -1328,6 +1301,19 @@ export default function App() {
                 }
             });
         }
+    };
+
+    // 🌟 目錄排序函式
+    const moveCatalog = (listKey, index, direction) => {
+        const newList = [...settingsData[listKey]];
+        if (direction === 'up' && index > 0) {
+            [newList[index - 1], newList[index]] = [newList[index], newList[index - 1]];
+        } else if (direction === 'down' && index < newList.length - 1) {
+            [newList[index + 1], newList[index]] = [newList[index], newList[index + 1]];
+        } else {
+            return;
+        }
+        setSettingsData(prev => ({ ...prev, [listKey]: newList }));
     };
 
     return (
@@ -1489,39 +1475,54 @@ export default function App() {
               </div>
           </div>
 
+          {/* 🌟 選單顯示指派區塊 (已移除格數設定並加入排序功能) */}
           <div className="space-y-6 pt-6 border-t">
-              <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">前台選單顯示設定 (打勾決定要在前台展示的選單)</h3>
+              <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">前台選單顯示設定 (勾選並排序)</h3>
               
               <div className="grid sm:grid-cols-2 gap-8">
                   <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
                     <h4 className="font-bold text-indigo-700 mb-3 flex items-center gap-2"><ImageIcon size={18}/> 一般區塊顯示內容</h4>
-                    <div className="space-y-2 mb-4 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-indigo-50">
-                        {settingsData.catalogs.map(cat => (
-                            <label key={`gen-${cat.id}`} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
-                                <input type="checkbox" className="w-5 h-5 accent-indigo-500 rounded" 
-                                    checked={settingsData.activeGeneralCatalogs.includes(cat.id)}
-                                    onChange={(e) => {
-                                        const newActive = e.target.checked 
-                                            ? [...settingsData.activeGeneralCatalogs, cat.id] 
-                                            : settingsData.activeGeneralCatalogs.filter(id => id !== cat.id);
-                                        setSettingsData({...settingsData, activeGeneralCatalogs: newActive});
-                                    }} 
-                                />
-                                <span className="font-bold text-gray-700">{cat.name} <span className="text-xs text-gray-400">({cat.balloons.length})</span></span>
-                            </label>
-                        ))}
+                    
+                    <div className="space-y-2 mb-4 bg-white p-3 rounded-xl border border-indigo-50">
+                        {settingsData.activeGeneralCatalogs.length === 0 && <p className="text-sm text-gray-400 text-center py-2">目前沒有選取的目錄</p>}
+                        {settingsData.activeGeneralCatalogs.map((catId, index) => {
+                            const cat = settingsData.catalogs.find(c => c.id === catId);
+                            if (!cat) return null;
+                            return (
+                                <div key={`act-gen-${catId}`} className="flex items-center justify-between p-2 bg-indigo-50/50 rounded-lg border border-indigo-100">
+                                    <span className="font-bold text-indigo-900 text-sm truncate pr-2">{cat.name} <span className="text-xs text-indigo-400">({cat.balloons.length})</span></span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => moveCatalog('activeGeneralCatalogs', index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ArrowUp size={16}/></button>
+                                        <button onClick={() => moveCatalog('activeGeneralCatalogs', index, 'down')} disabled={index === settingsData.activeGeneralCatalogs.length - 1} className="p-1 text-gray-400 hover:text-indigo-600 disabled:opacity-30"><ArrowDown size={16}/></button>
+                                        <button onClick={() => setSettingsData(prev => ({...prev, activeGeneralCatalogs: prev.activeGeneralCatalogs.filter(id => id !== catId)}))} className="p-1 ml-1 text-red-400 hover:text-red-600 bg-white rounded"><X size={16}/></button>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
-                    <div className="flex gap-4">
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold text-gray-500 mb-1">顯示格數</label>
-                            <input type="number" value={settingsData.gridSize} onChange={(e) => setSettingsData({...settingsData, gridSize: Math.max(1, parseInt(e.target.value) || 1)})} className="w-full border-2 border-white rounded-lg px-3 py-2 text-center font-bold" />
-                        </div>
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold text-gray-500 mb-1">圖片大小</label>
-                            <select value={settingsData.thumbnailSize} onChange={(e) => setSettingsData({...settingsData, thumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm">
-                                <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
-                            </select>
-                        </div>
+                    
+                    <div className="mb-4">
+                        <select 
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:border-indigo-500"
+                            onChange={(e) => {
+                                if (e.target.value && !settingsData.activeGeneralCatalogs.includes(e.target.value)) {
+                                    setSettingsData(prev => ({...prev, activeGeneralCatalogs: [...prev.activeGeneralCatalogs, e.target.value]}));
+                                }
+                                e.target.value = ''; 
+                            }}
+                        >
+                            <option value="">+ 加入其他目錄至一般區塊...</option>
+                            {settingsData.catalogs.filter(c => !settingsData.activeGeneralCatalogs.includes(c.id)).map(c => (
+                                <option key={`add-gen-${c.id}`} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="mt-auto">
+                        <label className="block text-xs font-bold text-gray-500 mb-1">圖片顯示大小</label>
+                        <select value={settingsData.thumbnailSize} onChange={(e) => setSettingsData({...settingsData, thumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm bg-white/80">
+                            <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
+                        </select>
                     </div>
                   </div>
 
@@ -1533,34 +1534,48 @@ export default function App() {
                             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-400"></div>
                         </label>
                     </div>
-                    <div className={`transition-all ${!settingsData.showVipSection ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <div className="space-y-2 mb-4 max-h-40 overflow-y-auto bg-white p-3 rounded-xl border border-yellow-50">
-                            {settingsData.catalogs.map(cat => (
-                                <label key={`vip-${cat.id}`} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg cursor-pointer">
-                                    <input type="checkbox" className="w-5 h-5 accent-yellow-500 rounded" 
-                                        checked={settingsData.activeVipCatalogs.includes(cat.id)}
-                                        onChange={(e) => {
-                                            const newActive = e.target.checked 
-                                                ? [...settingsData.activeVipCatalogs, cat.id] 
-                                                : settingsData.activeVipCatalogs.filter(id => id !== cat.id);
-                                            setSettingsData({...settingsData, activeVipCatalogs: newActive});
-                                        }} 
-                                    />
-                                    <span className="font-bold text-gray-700">{cat.name} <span className="text-xs text-gray-400">({cat.balloons.length})</span></span>
-                                </label>
-                            ))}
+                    <div className={`transition-all flex flex-col h-[calc(100%-36px)] ${!settingsData.showVipSection ? 'opacity-50 pointer-events-none' : ''}`}>
+                        
+                        <div className="space-y-2 mb-4 bg-white p-3 rounded-xl border border-yellow-100">
+                            {settingsData.activeVipCatalogs.length === 0 && <p className="text-sm text-gray-400 text-center py-2">目前沒有選取的目錄</p>}
+                            {settingsData.activeVipCatalogs.map((catId, index) => {
+                                const cat = settingsData.catalogs.find(c => c.id === catId);
+                                if (!cat) return null;
+                                return (
+                                    <div key={`act-vip-${catId}`} className="flex items-center justify-between p-2 bg-yellow-50/50 rounded-lg border border-yellow-100">
+                                        <span className="font-bold text-yellow-900 text-sm truncate pr-2">{cat.name} <span className="text-xs text-yellow-600">({cat.balloons.length})</span></span>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button onClick={() => moveCatalog('activeVipCatalogs', index, 'up')} disabled={index === 0} className="p-1 text-gray-400 hover:text-yellow-600 disabled:opacity-30"><ArrowUp size={16}/></button>
+                                            <button onClick={() => moveCatalog('activeVipCatalogs', index, 'down')} disabled={index === settingsData.activeVipCatalogs.length - 1} className="p-1 text-gray-400 hover:text-yellow-600 disabled:opacity-30"><ArrowDown size={16}/></button>
+                                            <button onClick={() => setSettingsData(prev => ({...prev, activeVipCatalogs: prev.activeVipCatalogs.filter(id => id !== catId)}))} className="p-1 ml-1 text-red-400 hover:text-red-600 bg-white rounded"><X size={16}/></button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <div className="flex gap-4">
-                            <div className="flex-1">
-                                <label className="block text-xs font-bold text-gray-500 mb-1">顯示格數</label>
-                                <input type="number" value={settingsData.vipGridSize} onChange={(e) => setSettingsData({...settingsData, vipGridSize: Math.max(1, parseInt(e.target.value) || 1)})} className="w-full border-2 border-white rounded-lg px-3 py-2 text-center font-bold" />
-                            </div>
-                            <div className="flex-1">
-                                <label className="block text-xs font-bold text-gray-500 mb-1">圖片大小</label>
-                                <select value={settingsData.vipThumbnailSize} onChange={(e) => setSettingsData({...settingsData, vipThumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm">
-                                    <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
-                                </select>
-                            </div>
+                        
+                        <div className="mb-4">
+                            <select 
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:border-yellow-500"
+                                onChange={(e) => {
+                                    if (e.target.value && !settingsData.activeVipCatalogs.includes(e.target.value)) {
+                                        setSettingsData(prev => ({...prev, activeVipCatalogs: [...prev.activeVipCatalogs, e.target.value]}));
+                                    }
+                                    e.target.value = ''; 
+                                }}
+                            >
+                                <option value="">+ 加入其他目錄至 VIP 區塊...</option>
+                                {settingsData.catalogs.filter(c => !settingsData.activeVipCatalogs.includes(c.id)).map(c => (
+                                    <option key={`add-vip-${c.id}`} value={c.id}>{c.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="mt-auto pt-2">
+                            <label className="block text-xs font-bold text-gray-500 mb-1">圖片顯示大小</label>
+                            <select value={settingsData.vipThumbnailSize} onChange={(e) => setSettingsData({...settingsData, vipThumbnailSize: e.target.value})} className="w-full border-2 border-white rounded-lg px-3 py-2 font-bold text-sm bg-white/80">
+                                <option value="sm">小</option><option value="md">中</option><option value="lg">大</option><option value="xl">特大</option>
+                            </select>
                         </div>
                     </div>
                   </div>
