@@ -136,12 +136,6 @@ export default function App() {
   const [selectedBalloon, setSelectedBalloon] = useState(null);
   const [successOrder, setSuccessOrder] = useState(null);
 
-  // Gemini AI 狀態
-  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-  const [aiQuery, setAiQuery] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiReason, setAiReason] = useState('');
-
   // 更改造型狀態
   const [isChangeOrderModalOpen, setIsChangeOrderModalOpen] = useState(false);
   const [changeOrderNumber, setChangeOrderNumber] = useState('');
@@ -367,28 +361,6 @@ export default function App() {
     }
   };
 
-  const handleAiRecommend = async () => {
-    if (!aiQuery.trim()) return;
-    setIsAiLoading(true);
-    const catalogInfo = displayBalloons.map(b => ({ id: b.id, name: b.name }));
-    const prompt = `你是一個熱情可愛的氣球魔法師。顧客說：「${aiQuery}」。請從以下氣球目錄中，挑選「一個」最適合的氣球推薦給他：\n${JSON.stringify(catalogInfo)}\n\n請以 JSON 格式回傳，包含 "id" (推薦的氣球ID數字) 與 "reason" (推薦理由，約20-30字內，語氣要非常活潑可愛，結尾加上emoji)。`;
-    
-    const result = await callGeminiAPI(prompt, true);
-    setIsAiLoading(false);
-    
-    if (result && result.id) {
-      const recommendedBalloon = displayBalloons.find(b => b.id === result.id);
-      if (recommendedBalloon) {
-        setIsAiModalOpen(false);
-        setAiReason(result.reason);
-        setSelectedBalloon(recommendedBalloon);
-        setAiQuery('');
-      } else {
-        setAiReason('哎呀！魔法師找不太到適合的，您可以自己挑選看看喔！✨');
-      }
-    }
-  };
-
   const handleBalloonClick = (balloon, isVipCategory = false) => {
     if (isVipCategory && !config.vipModeActive) {
       setAlertMessage("👑 這是 VIP 專屬造型！請先請氣球小V為您開啟 VIP 模式才能點選喔！");
@@ -443,7 +415,6 @@ export default function App() {
       }
 
       setSelectedBalloon(null);
-      setAiReason('');
       
       const initialSuccessOrder = { ...newOrder, story: config.loadingMessage, estimatedWaitTime: currentEstTime };
       setSuccessOrder(initialSuccessOrder);
@@ -669,6 +640,7 @@ export default function App() {
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
                         
+                        {/* 宣傳圖片 */}
                         {config.trackerImageUrl && (
                             <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                                 <img 
@@ -742,6 +714,7 @@ export default function App() {
   const renderGuestView = () => (
     <div className="pb-8 relative">
       
+      {/* 👑 VIP 模式橫幅 */}
       {config.vipModeActive && (
           <div className="bg-gradient-to-r from-amber-400 to-yellow-500 text-white font-bold py-3 px-4 rounded-2xl mb-4 shadow-lg flex items-center justify-center gap-2 animate-pulse">
               <Crown size={24} />
@@ -801,23 +774,6 @@ export default function App() {
               </div>
           </div>
       )}
-
-      <div className="mb-6">
-        <button 
-          onClick={() => {
-              if(isOrderFull) { setAlertMessage(config.fullOrderMessage); return; }
-              setIsAiModalOpen(true);
-          }}
-          className={`w-full sm:w-auto flex items-center justify-center gap-2 text-white px-6 py-3 rounded-2xl shadow-lg transition-all font-bold ${
-              isOrderFull 
-                ? 'bg-gray-400 cursor-not-allowed shadow-none' 
-                : 'bg-gradient-to-r from-violet-500 to-fuchsia-500 hover:from-violet-600 hover:to-fuchsia-600 shadow-fuchsia-500/30 active:scale-95'
-          }`}
-        >
-          <Sparkles size={20} />
-          不知道選什麼？問問 AI 魔法顧問！
-        </button>
-      </div>
 
       {config.showVipSection && displayVipBalloons.length > 0 && (
           <div className="mb-8 bg-gradient-to-br from-yellow-50 to-amber-50 p-4 sm:p-6 rounded-3xl border border-yellow-200 shadow-sm relative">
@@ -886,61 +842,17 @@ export default function App() {
           </div>
       )}
 
-      {/* 🌟 AI 魔法顧問 Modal */}
-      {isAiModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
-            <div className="w-16 h-16 mx-auto bg-fuchsia-100 text-fuchsia-500 rounded-full flex items-center justify-center mb-4 shadow-inner">
-              <Wand2 size={32} />
-            </div>
-            <h3 className="text-2xl font-black text-center text-gray-800 mb-2">魔法顧問</h3>
-            <p className="text-center text-gray-500 mb-6 text-sm font-medium">
-              請告訴我您今天的心情，或是喜歡什麼動物、顏色？我來為您挑選最棒的造型！
-            </p>
-            
-            <textarea
-              value={aiQuery}
-              onChange={(e) => setAiQuery(e.target.value)}
-              placeholder="例如：我想要一個在天上飛的、或是粉紅色的可愛動物..."
-              className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-2xl mb-6 focus:outline-none focus:border-fuchsia-500 resize-none h-24 font-medium"
-            />
+      {/* --- Modals --- */}
 
-            <div className="flex gap-3">
-              <button 
-                onClick={() => setIsAiModalOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
-                disabled={isAiLoading}
-              >
-                取消
-              </button>
-              <button 
-                onClick={handleAiRecommend}
-                disabled={isAiLoading || !aiQuery.trim()}
-                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-fuchsia-500 hover:bg-fuchsia-600 shadow-lg shadow-fuchsia-500/30 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-70"
-              >
-                {isAiLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-                {isAiLoading ? '施法中...' : '為我推薦'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 確認點單 Modal */}
+      {/* 🌟🌟🌟 確認點單 Modal 🌟🌟🌟 */}
       {selectedBalloon && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-sm sm:max-w-md w-full shadow-2xl scale-in-center">
             <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-2">確認造型</h3>
             
-            {aiReason ? (
-              <div className="bg-fuchsia-50 text-fuchsia-700 p-3 rounded-xl text-sm font-medium mb-4 text-center border border-fuchsia-100 flex flex-col items-center gap-1">
-                <Sparkles size={16} className="text-fuchsia-500 shrink-0" />
-                <span>{aiReason}</span>
-              </div>
-            ) : (
-              <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
-            )}
+            <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
             
+            {/* 圖片容器放得非常大，並加上精緻的外框 */}
             <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] mb-8 shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
               {isImageUrl(selectedBalloon.icon) ? (
                 <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
@@ -951,7 +863,7 @@ export default function App() {
 
             <div className="flex gap-3">
               <button 
-                onClick={() => { setSelectedBalloon(null); setAiReason(''); }}
+                onClick={() => setSelectedBalloon(null)}
                 className="flex-1 py-4 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors text-lg"
               >
                 重新選擇
@@ -1894,6 +1806,35 @@ export default function App() {
                     <button onClick={handleAdminLogin} className="flex-1 py-3 rounded-xl font-bold text-white bg-indigo-500 hover:bg-indigo-600 shadow-md transition-colors">進入</button>
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* 🌟 清空所有訂單確認 Modal (防呆機制) */}
+      {isClearConfirmOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center">
+            <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-500 mb-4 shadow-inner">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className="text-xl font-black text-center text-gray-800 mb-2">確定要清空所有訂單嗎？</h3>
+            <p className="text-center text-red-600 font-bold mb-6 text-sm bg-red-50 p-3 rounded-xl border border-red-100">
+              ⚠️ 警告：這個操作將會刪除「所有待製作」與「已完成」的訂單資料，且無法復原！
+            </p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setIsClearConfirmOpen(false)}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleClearAllOrders}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30 transition-colors"
+              >
+                確認清空
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
