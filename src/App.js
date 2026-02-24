@@ -134,6 +134,12 @@ export default function App() {
   const [selectedBalloon, setSelectedBalloon] = useState(null);
   const [successOrder, setSuccessOrder] = useState(null);
 
+  // Gemini AI 狀態
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [aiQuery, setAiQuery] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiReason, setAiReason] = useState('');
+
   // 更改造型狀態
   const [isChangeOrderModalOpen, setIsChangeOrderModalOpen] = useState(false);
   const [changeOrderNumber, setChangeOrderNumber] = useState('');
@@ -359,6 +365,28 @@ export default function App() {
     }
   };
 
+  const handleAiRecommend = async () => {
+    if (!aiQuery.trim()) return;
+    setIsAiLoading(true);
+    const catalogInfo = displayBalloons.map(b => ({ id: b.id, name: b.name }));
+    const prompt = `你是一個熱情可愛的氣球魔法師。顧客說：「${aiQuery}」。請從以下氣球目錄中，挑選「一個」最適合的氣球推薦給他：\n${JSON.stringify(catalogInfo)}\n\n請以 JSON 格式回傳，包含 "id" (推薦的氣球ID數字) 與 "reason" (推薦理由，約20-30字內，語氣要非常活潑可愛，結尾加上emoji)。`;
+    
+    const result = await callGeminiAPI(prompt, true);
+    setIsAiLoading(false);
+    
+    if (result && result.id) {
+      const recommendedBalloon = displayBalloons.find(b => b.id === result.id);
+      if (recommendedBalloon) {
+        setIsAiModalOpen(false);
+        setAiReason(result.reason);
+        setSelectedBalloon(recommendedBalloon);
+        setAiQuery('');
+      } else {
+        setAiReason('哎呀！魔法師找不太到適合的，您可以自己挑選看看喔！✨');
+      }
+    }
+  };
+
   const handleBalloonClick = (balloon, isVipCategory = false) => {
     if (isVipCategory && !config.vipModeActive) {
       setAlertMessage("👑 這是 VIP 專屬造型！請先請氣球小V為您開啟 VIP 模式才能點選喔！");
@@ -405,13 +433,20 @@ export default function App() {
     };
 
     try {
+      // 1. 先將訂單加入資料庫
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), newOrder);
       
+      // 2. 如果是 VIP 訂單，嘗試關閉系統的 VIP 模式 (加上錯誤隔離防護)
       if (isVipOrder) {
-          const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
-          await updateDoc(configRef, { vipModeActive: false });
+          try {
+              const configRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
+              await updateDoc(configRef, { vipModeActive: false });
+          } catch (updateErr) {
+              console.warn("Guest user lacks permission to reset VIP mode setting, skipping.", updateErr);
+          }
       }
 
+      // 3. 執行成功後的 UI 狀態更新
       setSelectedBalloon(null);
       setAiReason('');
       
@@ -1303,7 +1338,6 @@ export default function App() {
         }
     };
 
-    // 🌟 目錄排序函式
     const moveCatalog = (listKey, index, direction) => {
         const newList = [...settingsData[listKey]];
         if (direction === 'up' && index > 0) {
@@ -1475,7 +1509,6 @@ export default function App() {
               </div>
           </div>
 
-          {/* 🌟 選單顯示指派區塊 (已移除格數設定並加入排序功能) */}
           <div className="space-y-6 pt-6 border-t">
               <h3 className="font-bold text-gray-800 border-b pb-2 text-lg">前台選單顯示設定 (勾選並排序)</h3>
               
