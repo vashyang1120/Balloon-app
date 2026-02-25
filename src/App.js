@@ -1536,15 +1536,16 @@ export default function App() {
                     
                     <div className="mb-4">
                         <select 
+                            value=""
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:border-indigo-500"
                             onChange={(e) => {
-                                if (e.target.value && !settingsData.activeGeneralCatalogs.includes(e.target.value)) {
-                                    setSettingsData(prev => ({...prev, activeGeneralCatalogs: [...prev.activeGeneralCatalogs, e.target.value]}));
+                                const val = e.target.value;
+                                if (val && !settingsData.activeGeneralCatalogs.includes(val)) {
+                                    setSettingsData(prev => ({...prev, activeGeneralCatalogs: [...prev.activeGeneralCatalogs, val]}));
                                 }
-                                e.target.value = ''; 
                             }}
                         >
-                            <option value="">+ 加入其他目錄至一般區塊...</option>
+                            <option value="" disabled>+ 加入其他目錄至一般區塊...</option>
                             {settingsData.catalogs.filter(c => !settingsData.activeGeneralCatalogs.includes(c.id)).map(c => (
                                 <option key={`add-gen-${c.id}`} value={c.id}>{c.name}</option>
                             ))}
@@ -1589,15 +1590,16 @@ export default function App() {
                         
                         <div className="mb-4">
                             <select 
+                                value=""
                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:border-yellow-500"
                                 onChange={(e) => {
-                                    if (e.target.value && !settingsData.activeVipCatalogs.includes(e.target.value)) {
-                                        setSettingsData(prev => ({...prev, activeVipCatalogs: [...prev.activeVipCatalogs, e.target.value]}));
+                                    const val = e.target.value;
+                                    if (val && !settingsData.activeVipCatalogs.includes(val)) {
+                                        setSettingsData(prev => ({...prev, activeVipCatalogs: [...prev.activeVipCatalogs, val]}));
                                     }
-                                    e.target.value = ''; 
                                 }}
                             >
-                                <option value="">+ 加入其他目錄至 VIP 區塊...</option>
+                                <option value="" disabled>+ 加入其他目錄至 VIP 區塊...</option>
                                 {settingsData.catalogs.filter(c => !settingsData.activeVipCatalogs.includes(c.id)).map(c => (
                                     <option key={`add-vip-${c.id}`} value={c.id}>{c.name}</option>
                                 ))}
