@@ -103,6 +103,7 @@ export default function App() {
   const isTrackerMode = urlParams.get('view') === 'tracker';
   const [view, setView] = useState(isTrackerMode ? 'tracker' : 'guest'); 
   
+  // 系統設定狀態
   const [config, setConfig] = useState({ 
     timePerItem: 3, 
     vipTimePerItem: 5, 
@@ -119,8 +120,12 @@ export default function App() {
     completedButtonText: '回到氣球小V官網', 
     completedButtonUrl: 'https://balloonv.com/', 
     vipModeActive: false,
-    orderingEnabled: true, // 🌟 新增：點單功能總開關
+    orderingEnabled: true,
     adminPin: '8888',
+    watermarkType: 'none', 
+    watermarkText: '氣球小V', 
+    watermarkImageUrl: '',    
+    watermarkOpacity: 30, // 🌟 新增：浮水印透明度 (預設 30%)
     catalogs: [
         { id: 'cat-gen', name: '預設一般選單', balloons: DEFAULT_BALLOONS }
     ],
@@ -217,8 +222,12 @@ export default function App() {
         }
         if (!data.completedButtonText) data.completedButtonText = '回到氣球小V官網';
         if (!data.completedButtonUrl) data.completedButtonUrl = 'https://balloonv.com/';
-        // 確保預設開啟
         if (data.orderingEnabled === undefined) data.orderingEnabled = true;
+
+        if (!data.watermarkType) data.watermarkType = 'none';
+        if (!data.watermarkText) data.watermarkText = '氣球小V';
+        if (!data.watermarkImageUrl) data.watermarkImageUrl = '';
+        if (data.watermarkOpacity === undefined) data.watermarkOpacity = 30; // 確保有預設透明度
         
         setConfig(prev => ({ ...prev, ...data }));
       } else {
@@ -256,7 +265,6 @@ export default function App() {
   const pendingOrders = useMemo(() => orders.filter(o => o.status === 'pending'), [orders]);
   const waitingCount = pendingOrders.length;
   const estimatedWaitTime = getWaitTimeForQueue(pendingOrders);
-  // 滿單判斷 (加入 orderingEnabled 判斷)
   const isOrderFull = waitingCount >= config.maxWaitCount && !config.vipModeActive;
 
   const displayBalloons = useMemo(() => {
@@ -334,6 +342,50 @@ export default function App() {
     return { background: config.bgStyle };
   }, [config.bgStyle]);
 
+  // 🌟 萬用的氣球圖片渲染器 (支援傳入自訂 config 以便即時預覽透明度)
+  const renderBalloonImage = (item, sizeClass, hoverEffect = false, showWatermark = true, isLarge = false, customConfig = null) => {
+    const wConfig = customConfig || config; // 優先使用傳入的設定檔 (用於後台即時預覽)
+    const iconData = item.icon || '';
+    const colorData = item.color || 'bg-gray-100 text-gray-600';
+    const nameData = item.name || item.balloonName || '';
+    const isImg = isImageUrl(iconData);
+    
+    // 將 0~100 的透明度轉換為 0~1 的小數
+    const opacityVal = wConfig.watermarkOpacity !== undefined ? wConfig.watermarkOpacity / 100 : 0.3;
+    
+    return (
+        <div className={`${sizeClass} flex items-center justify-center transition-transform overflow-hidden relative ${hoverEffect ? 'group-hover:scale-110' : ''} ${!isImg ? colorData : ''}`}>
+            {isImg ? (
+                <img src={getDisplayImageUrl(iconData)} alt={nameData} className="w-full h-full object-cover" />
+            ) : (
+                iconData
+            )}
+            
+            {/* 浮水印覆蓋層 */}
+            {isImg && showWatermark && wConfig.watermarkType && wConfig.watermarkType !== 'none' && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 overflow-hidden p-1">
+                    {wConfig.watermarkType === 'text' && wConfig.watermarkText && (
+                        <div 
+                            className={`text-white font-black text-center rotate-[-30deg] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] select-none leading-tight ${isLarge ? 'text-3xl sm:text-4xl w-[150%]' : 'text-xs sm:text-sm w-[180%]'}`}
+                            style={{ opacity: opacityVal }}
+                        >
+                            {wConfig.watermarkText}
+                        </div>
+                    )}
+                    {wConfig.watermarkType === 'image' && wConfig.watermarkImageUrl && (
+                        <img 
+                            src={getDisplayImageUrl(wConfig.watermarkImageUrl)} 
+                            alt="watermark" 
+                            className="w-3/4 h-3/4 object-contain select-none drop-shadow-md" 
+                            style={{ opacity: opacityVal }}
+                        />
+                    )}
+                </div>
+            )}
+        </div>
+    );
+  };
+
   const callGeminiAPI = async (prompt, isJson = false) => {
     const apiKey = ""; 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -380,10 +432,8 @@ export default function App() {
     }
   };
 
-  // 🌟 修改點選邏輯，處理關閉點單功能時的預覽
   const handleBalloonClick = (balloon, isVipCategory = false) => {
     if (config.orderingEnabled === false) {
-        // 純預覽模式：無條件顯示大圖，不可送出
         setSelectedBalloon({ ...balloon, isPreviewOnly: true });
         return;
     }
@@ -673,14 +723,11 @@ export default function App() {
                         <h4 className="font-black text-2xl mb-2 text-gray-800">您的氣球已完成！</h4>
                         <p className="font-bold text-green-600 text-lg">請前往攤位領取您的</p>
                         <div className="inline-flex items-center gap-2 bg-green-50 px-4 py-2 rounded-xl mt-3 border border-green-200 shadow-sm">
-                            {isImageUrl(trackedOrder.icon) ? (
-                                <img src={getDisplayImageUrl(trackedOrder.icon)} alt={trackedOrder.balloonName} className="w-8 h-8 object-cover rounded-md" />
-                            ) : (
-                                <span className="text-3xl">{trackedOrder.icon}</span>
-                            )}
+                            {renderBalloonImage(trackedOrder, "w-8 h-8 rounded-md text-3xl", false, false)}
                             <span className="font-black text-xl text-green-700">{trackedOrder.balloonName}</span>
                         </div>
                         
+                        {/* 宣傳圖片 */}
                         {config.trackerImageUrl && (
                             <div className="mt-8 rounded-2xl overflow-hidden shadow-sm border border-gray-100">
                                 <img 
@@ -713,9 +760,7 @@ export default function App() {
                         </h4>
                         
                         <div className="flex items-center gap-4 mb-8 bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                            <div className={`w-16 h-16 bg-white rounded-xl shadow-sm flex items-center justify-center text-4xl shrink-0 overflow-hidden ${!isImageUrl(trackedOrder.icon) ? (trackedOrder.color || 'bg-gray-100') : ''}`}>
-                                {isImageUrl(trackedOrder.icon) ? <img src={getDisplayImageUrl(trackedOrder.icon)} alt="icon" className="w-full h-full object-cover"/> : trackedOrder.icon}
-                            </div>
+                            {renderBalloonImage(trackedOrder, "w-16 h-16 bg-white rounded-xl shadow-sm text-4xl shrink-0", false, false)}
                             <div>
                                 <p className="text-xs font-bold text-gray-400 mb-1">您預訂的造型</p>
                                 <p className="font-black text-xl text-gray-800">{trackedOrder.balloonName}</p>
@@ -763,7 +808,6 @@ export default function App() {
           </div>
       )}
 
-      {/* 🌟 狀態列與現正製作 */}
       <div className="bg-white/90 backdrop-blur-md rounded-2xl shadow-sm p-4 mb-4 border border-pink-100 flex flex-col gap-4">
         <div className="flex items-center justify-between bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-xl shadow-md">
             <div className="flex items-center gap-2 sm:gap-3">
@@ -842,12 +886,9 @@ export default function App() {
                                   </div>
                               </div>
                           )}
-                          <div className={`${getSizeClasses(config.vipThumbnailSize)} rounded-xl flex items-center justify-center mb-2 transition-transform overflow-hidden ${(config.vipModeActive || config.orderingEnabled === false) && 'group-hover:scale-110'} ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
-                              {isImageUrl(balloon.icon) ? (
-                                  <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
-                              ) : (balloon.icon)}
-                          </div>
-                          <span className="font-bold text-amber-900 text-sm sm:text-base">{balloon.name}</span>
+                          {/* 🌟 套用通用圖片渲染器 */}
+                          {renderBalloonImage(balloon, `${getSizeClasses(config.vipThumbnailSize)} rounded-xl mb-2`, (config.vipModeActive || config.orderingEnabled === false))}
+                          <span className="font-bold text-amber-900 text-sm sm:text-base z-20">{balloon.name}</span>
                       </button>
                   ))}
               </div>
@@ -863,18 +904,13 @@ export default function App() {
           <button
             key={`gen-${balloon.id}-${idx}`}
             onClick={() => handleBalloonClick(balloon, false)}
-            className={`group flex flex-col items-center bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent ${
+            className={`group flex flex-col items-center bg-white/90 backdrop-blur-sm rounded-2xl shadow-sm transition-all p-3 sm:p-4 border-2 border-transparent relative ${
                 (isOrderFull && config.orderingEnabled !== false) ? 'cursor-not-allowed' : 'hover:shadow-md hover:border-pink-300 hover:bg-white active:scale-95'
             }`}
           >
-            <div className={`${getSizeClasses(config.thumbnailSize)} rounded-xl flex items-center justify-center mb-2 transition-transform overflow-hidden ${!(isOrderFull && config.orderingEnabled !== false) && 'group-hover:scale-110'} ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
-              {isImageUrl(balloon.icon) ? (
-                <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
-              ) : (
-                balloon.icon
-              )}
-            </div>
-            <span className="font-medium text-gray-700 text-sm sm:text-base">{balloon.name}</span>
+            {/* 🌟 套用通用圖片渲染器 */}
+            {renderBalloonImage(balloon, `${getSizeClasses(config.thumbnailSize)} rounded-xl mb-2`, !(isOrderFull && config.orderingEnabled !== false))}
+            <span className="font-medium text-gray-700 text-sm sm:text-base z-20">{balloon.name}</span>
           </button>
         ))}
       </div>
@@ -895,18 +931,12 @@ export default function App() {
             {selectedBalloon.isPreviewOnly ? (
                 // 🌟 純預覽模式 (不顯示確認按鈕)
                 <>
-                    <button onClick={() => setSelectedBalloon(null)} className="absolute top-4 right-4 p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors z-10">
+                    <button onClick={() => setSelectedBalloon(null)} className="absolute top-4 right-4 p-2 text-gray-400 hover:bg-gray-100 rounded-full transition-colors z-20">
                         <X size={24} />
                     </button>
                     <h3 className="text-2xl sm:text-3xl font-black text-center text-gray-800 mb-6 px-8">{selectedBalloon.name}</h3>
                     
-                    <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
-                      {isImageUrl(selectedBalloon.icon) ? (
-                        <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
-                      ) : (
-                        selectedBalloon.icon
-                      )}
-                    </div>
+                    {renderBalloonImage(selectedBalloon, "w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl mb-8 shadow-lg border-4 border-white ring-1 ring-gray-100 text-[100px] sm:text-[150px]", false, true, true)}
                 </>
             ) : (
                 // 🌟 正常點單確認模式
@@ -915,14 +945,7 @@ export default function App() {
                     
                     <p className="text-center text-gray-500 mb-6 font-medium">您選擇的是 <span className="text-pink-500 font-black text-xl">{selectedBalloon.name}</span>，確定要送出嗎？</p>
                     
-                    {/* 圖片容器放得非常大，並加上精緻的外框 */}
-                    <div className={`w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl flex items-center justify-center text-[100px] sm:text-[150px] mb-8 shadow-lg border-4 border-white overflow-hidden ring-1 ring-gray-100 ${!isImageUrl(selectedBalloon.icon) ? (selectedBalloon.color || 'bg-gray-100') : ''}`}>
-                      {isImageUrl(selectedBalloon.icon) ? (
-                        <img src={getDisplayImageUrl(selectedBalloon.icon)} alt={selectedBalloon.name} className="w-full h-full object-cover" />
-                      ) : (
-                        selectedBalloon.icon
-                      )}
-                    </div>
+                    {renderBalloonImage(selectedBalloon, "w-full max-w-[280px] sm:max-w-[360px] aspect-square mx-auto rounded-3xl mb-8 shadow-lg border-4 border-white ring-1 ring-gray-100 text-[100px] sm:text-[150px]", false, true, true)}
 
                     <div className="flex gap-3">
                       <button 
@@ -1033,18 +1056,14 @@ export default function App() {
                             <button
                                 key={`new-${balloon.id}-${idx}`}
                                 onClick={() => setNewSelectedBalloon(balloon)}
-                                className={`flex flex-col items-center p-2 rounded-xl border-2 transition-all ${
+                                className={`flex flex-col items-center p-2 rounded-xl border-2 transition-all relative ${
                                     newSelectedBalloon?.id === balloon.id 
                                         ? 'border-indigo-500 bg-indigo-50 shadow-md scale-105' 
                                         : 'border-gray-100 bg-white hover:border-indigo-300 shadow-sm'
                                 }`}
                             >
-                                <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-3xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-100') : ''}`}>
-                                    {isImageUrl(balloon.icon) ? (
-                                        <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" />
-                                    ) : (balloon.icon)}
-                                </div>
-                                <span className="text-xs font-bold text-gray-700 text-center leading-tight">{balloon.name}</span>
+                                {renderBalloonImage(balloon, "w-14 h-14 rounded-xl mb-1 text-3xl", false, true, false)}
+                                <span className="text-xs font-bold text-gray-700 text-center leading-tight z-20">{balloon.name}</span>
                             </button>
                         ))}
                     </div>
@@ -1086,13 +1105,7 @@ export default function App() {
               <p className="text-6xl font-black text-pink-500 mb-4">#{successOrder.orderNumber}</p>
               
               <div className="flex items-center justify-center gap-2 text-gray-600 font-medium bg-white py-2 px-4 rounded-lg inline-flex shadow-sm">
-                <div className={`w-6 h-6 flex items-center justify-center rounded-md overflow-hidden ${!isImageUrl(successOrder.icon) ? (successOrder.color || 'bg-gray-100') : ''}`}>
-                    {isImageUrl(successOrder.icon) ? (
-                    <img src={getDisplayImageUrl(successOrder.icon)} alt={successOrder.balloonName} className="w-full h-full object-cover" />
-                    ) : (
-                    <span className="text-lg">{successOrder.icon}</span>
-                    )}
-                </div>
+                {renderBalloonImage(successOrder, "w-6 h-6 rounded-md text-lg", false, false)}
                 <span>{successOrder.balloonName}</span>
               </div>
             </div>
@@ -1455,6 +1468,76 @@ export default function App() {
                 />
               </div>
 
+              {/* 🌟 浮水印設定區塊 */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 space-y-4">
+                  <div className="col-span-full">
+                      <label className="block text-sm font-bold text-indigo-800 mb-1 flex items-center gap-1"><ImageIcon size={16}/> 防盜圖浮水印設定</label>
+                      <p className="text-xs text-indigo-600 mb-3">保護您的氣球作品不被輕易截圖盜用，將自動加在所有造型預覽圖上。</p>
+                  </div>
+                  <div>
+                      <label className="block text-xs font-bold text-gray-500 mb-1">浮水印類型</label>
+                      <select 
+                          value={settingsData.watermarkType || 'none'}
+                          onChange={(e) => setSettingsData({...settingsData, watermarkType: e.target.value})}
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      >
+                          <option value="none">無 (關閉浮水印)</option>
+                          <option value="text">文字浮水印</option>
+                          <option value="image">圖片浮水印 (PNG格式)</option>
+                      </select>
+                  </div>
+                  
+                  {settingsData.watermarkType === 'text' && (
+                      <div className="animate-in fade-in">
+                          <label className="block text-xs font-bold text-gray-500 mb-1">浮水印文字</label>
+                          <input 
+                              type="text" 
+                              value={settingsData.watermarkText || ''}
+                              onChange={(e) => setSettingsData({...settingsData, watermarkText: e.target.value})}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                              placeholder="例如：氣球小V 專屬"
+                          />
+                      </div>
+                  )}
+
+                  {settingsData.watermarkType === 'image' && (
+                      <div className="animate-in fade-in">
+                          <label className="block text-xs font-bold text-gray-500 mb-1">浮水印圖片連結</label>
+                          <input 
+                              type="text" 
+                              value={settingsData.watermarkImageUrl || ''}
+                              onChange={(e) => setSettingsData({...settingsData, watermarkImageUrl: e.target.value})}
+                              className="w-full border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                              placeholder="貼上圖片的 Google Drive 分享連結"
+                          />
+                          <p className="text-[11px] text-gray-400 mt-1">建議上傳具有透明背景的 PNG 圖檔，系統會自動置中並半透明覆蓋。</p>
+                      </div>
+                  )}
+
+                  {/* 🌟 浮水印透明度拉桿與即時預覽 */}
+                  {settingsData.watermarkType !== 'none' && (
+                      <div className="animate-in fade-in pt-2">
+                          <label className="block text-xs font-bold text-gray-500 mb-2 flex justify-between">
+                              <span>浮水印透明度 (數字越小越透明)</span>
+                              <span className="text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">{settingsData.watermarkOpacity !== undefined ? settingsData.watermarkOpacity : 30}%</span>
+                          </label>
+                          <input 
+                              type="range" 
+                              min="5" max="100" 
+                              value={settingsData.watermarkOpacity !== undefined ? settingsData.watermarkOpacity : 30}
+                              onChange={(e) => setSettingsData({...settingsData, watermarkOpacity: parseInt(e.target.value)})}
+                              className="w-full accent-indigo-500 h-2 bg-indigo-100 rounded-lg appearance-none cursor-pointer mb-4"
+                          />
+                          
+                          {/* 🌟 即時預覽區塊 */}
+                          <div className="bg-white p-4 rounded-xl border border-indigo-50 flex flex-col items-center shadow-inner">
+                              <span className="text-xs font-bold text-gray-400 mb-3">效果即時預覽</span>
+                              {renderBalloonImage({ name: '預覽範例', icon: 'https://images.unsplash.com/photo-1530103862676-de8892b12eb6?auto=format&fit=crop&q=80&w=400', color: 'bg-gray-100' }, "w-32 h-32 sm:w-40 sm:h-40 rounded-2xl text-6xl shadow-sm", false, true, false, settingsData)}
+                          </div>
+                      </div>
+                  )}
+              </div>
+
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">查詢進度頁面宣傳圖 (圖片網址)</label>
                 <input 
@@ -1765,10 +1848,9 @@ export default function App() {
                                 onClick={() => setEditingBalloon({...balloon, catId: editingCatalogId})}
                                 className="relative group flex flex-col items-center bg-gray-50 rounded-xl p-2 border-2 border-transparent hover:border-indigo-300 transition-all shadow-sm"
                             >
-                                <div className="absolute top-1 right-1 bg-white p-1 rounded-full shadow opacity-0 group-hover:opacity-100 text-indigo-500"><Pencil size={12} /></div>
-                                <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-1 overflow-hidden ${!isImageUrl(balloon.icon) ? (balloon.color || 'bg-gray-200') : ''}`}>
-                                    {isImageUrl(balloon.icon) ? <img src={getDisplayImageUrl(balloon.icon)} alt={balloon.name} className="w-full h-full object-cover" /> : balloon.icon}
-                                </div>
+                                <div className="absolute top-1 right-1 bg-white p-1 rounded-full shadow opacity-0 group-hover:opacity-100 text-indigo-500 z-20"><Pencil size={12} /></div>
+                                {/* 🌟 帶入 settingsData 實現即時預覽透明度效果 */}
+                                {renderBalloonImage(balloon, "w-12 h-12 rounded-lg mb-1 text-2xl", false, true, false, settingsData)}
                                 <span className="font-medium text-gray-600 text-xs truncate w-full text-center">{balloon.name}</span>
                             </button>
                         ))}
@@ -1810,14 +1892,9 @@ export default function App() {
                 </div>
 
                 <div className="pt-2 flex flex-col items-center">
-                  <span className="text-xs font-bold text-gray-400 mb-2">預覽畫面</span>
-                  <div className={`w-24 h-24 rounded-2xl flex items-center justify-center text-5xl overflow-hidden shadow-inner ${!isImageUrl(editingBalloon.icon) ? (editingBalloon.color || 'bg-gray-100') : ''}`}>
-                    {isImageUrl(editingBalloon.icon) ? (
-                      <img src={getDisplayImageUrl(editingBalloon.icon)} alt="preview" className="w-full h-full object-cover" />
-                    ) : (
-                      editingBalloon.icon
-                    )}
-                  </div>
+                  <span className="text-xs font-bold text-gray-400 mb-2">預覽畫面 (含浮水印效果)</span>
+                  {/* 🌟 帶入 settingsData 實現即時預覽透明度效果 */}
+                  {renderBalloonImage(editingBalloon, "w-24 h-24 rounded-2xl text-5xl shadow-inner", false, true, false, settingsData)}
                 </div>
               </div>
 
@@ -1907,7 +1984,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🌟 全域客製化確認對話框 (Confirm Modal) */}
+      {/* 🌟 全域客製化確認對話框 (Confirm Modal) - 加入 onCancel 處理 */}
       {confirmAction && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl scale-in-center text-center">
